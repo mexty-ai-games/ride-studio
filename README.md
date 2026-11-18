@@ -57,9 +57,9 @@ In Settings → Appareils, tap "Associer un appareil" and run on the machine (No
 
 ```bash
 git clone https://github.com/mext-ai/ride-studio && cd ride-studio
-npm install && npm run build -w agent
-node agent/dist/agent/src/index.js pair <code> --server https://<ride-studio-host> --name aiden
-node agent/dist/agent/src/index.js        # the daemon; keep it running
+npm install && npm run build
+npm run agent -- pair <code> --server https://<ride-studio-host> --name aiden
+npm run agent                           # the daemon; keep it running
 ```
 
 The daemon only makes an outbound WebSocket connection. Workers get no built-in tools (`tools: []`) and a permission callback that allows only the MCP servers listed in Settings.
