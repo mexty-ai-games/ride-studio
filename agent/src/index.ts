@@ -44,7 +44,7 @@ async function pair() {
   const code = process.argv[3];
   const server = (arg("--server") || process.env.RIDE_STUDIO_URL || "").replace(/\/$/, "");
   if (!code || !server) {
-    console.error("Usage: ride-agent pair <code> --server https://<ride-studio-host> [--name aiden]");
+    console.error("Usage: npm run agent -- pair <code> --server https://<ride-studio-host> [--name aiden]");
     process.exit(1);
   }
   const name = arg("--name") || hostname();
@@ -55,7 +55,7 @@ async function pair() {
   }
   const j = (await r.json()) as { token: string; name: string };
   save({ server, token: j.token, name: j.name, concurrency: 2 });
-  console.log(`Paired as "${j.name}". Start the daemon with: ride-agent`);
+  console.log(`Paired as "${j.name}". Start the daemon with: npm run agent`);
 }
 
 function claudeVersion(): Promise<string | null> {
@@ -129,7 +129,7 @@ function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortCo
 async function daemon() {
   const cfg = load();
   if (!cfg) {
-    console.error("Not paired yet. Run: ride-agent pair <code> --server https://<ride-studio-host>");
+    console.error("Not paired yet. Run: npm run agent -- pair <code> --server https://<ride-studio-host>");
     process.exit(1);
   }
   mkdirSync(workDir, { recursive: true });
