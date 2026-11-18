@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "RS"; src: local("Inter"), local("Segoe UI"), local("Helvetica Neue"), local("Arial"); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #FFFFFF; color: #0B1640; font-family: RS, system-ui, sans-serif; overflow: hidden; }
+  .wrap { height: 100%; display: flex; flex-direction: column; padding: 22px 26px 16px; gap: 14px; }
+  .top { display: flex; align-items: center; gap: 10px; }
+  .pill { display: flex; align-items: center; gap: 7px; background: #0B1640; color: #fff; border-radius: 999px; padding: 5px 12px 5px 9px; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #FF6FB5; animation: pulse 1.4s infinite; }
+  .kind { font-size: 15px; font-weight: 700; color: #5B2FD0; text-transform: uppercase; letter-spacing: .08em; }
+  h1 { margin: 0; font-size: 42px; font-weight: 800; letter-spacing: -.02em; line-height: 1.04; min-height: 44px; }
+  .stage { flex: 1; min-height: 0; position: relative; }
+  .card { position: absolute; inset: 0; background: #F3F4FB; border-radius: 20px; padding: 22px 26px; display: flex; flex-direction: column; gap: 12px; outline: 3px solid transparent; transition: outline-color .3s; }
+  .card.hot { outline-color: #E8388F; box-shadow: 0 0 0 8px rgba(232,56,143,.12); }
+  .card h2 { margin: 0; font-size: 36px; font-weight: 800; letter-spacing: -.01em; min-height: 30px; }
+  .line { font-size: 25px; line-height: 1.35; padding: 10px 14px; background: #fff; border: 1px solid #E1E4F2; border-radius: 12px; animation: in .45s cubic-bezier(.2,.9,.3,1.2) both; }
+  .line.new { border: 2px solid #7B3FE4; }
+  .chip { position: absolute; top: -14px; right: 18px; background: #E8388F; color: #fff; font-size: 17px; font-weight: 800; padding: 5px 12px; border-radius: 999px; opacity: 0; transform: translateY(6px); transition: all .25s; }
+  .card.hot .chip { opacity: 1; transform: none; }
+  .empty { margin: auto; color: #535C80; font-size: 18px; font-weight: 600; }
+  .strip { display: flex; gap: 8px; overflow: hidden; height: 46px; }
+  .thumb { flex: 0 0 auto; max-width: 190px; height: 46px; border-radius: 10px; background: #EEF0F8; color: #535C80; font-size: 14px; font-weight: 600; padding: 6px 9px; display: flex; flex-direction: column; justify-content: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; animation: in .4s both; border: 2px solid transparent; }
+  .thumb b { font-size: 10px; color: #7B3FE4; }
+  .thumb.cur { border-color: #7B3FE4; background: #F1EBFF; color: #0B1640; }
+  .caret::after { content: "▍"; color: #E8388F; animation: pulse .8s infinite; }
+  @keyframes in { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+  @keyframes pulse { 50% { opacity: .35; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><span class="pill"><span class="dot"></span>LIVE BUILD</span><span class="kind" id="kind"></span></div>
+  <h1 id="title"></h1>
+  <div class="stage"><div class="card" id="card"><span class="chip" id="chip">+ ajouté</span><div class="empty" id="empty">En attente du premier écran…</div></div></div>
+  <div class="strip" id="strip"></div>
+</div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const card = $("card");
+  let shown = null, hotTimer = 0, typing = 0;
+  const state = { items: [], title: "" };
+
+  function type(el, text) {
+    // Text "typing": reveal the string a few characters per frame.
+    const my = ++typing; let i = 0;
+    el.classList.add("caret");
+    (function step() {
+      if (my !== typing) { el.textContent = text; el.classList.remove("caret"); return; }
+      i = Math.min(text.length, i + 2);
+      el.textContent = text.slice(0, i);
+      if (i < text.length) requestAnimationFrame(step); else el.classList.remove("caret");
+    })();
+  }
+
+  function render(item, fresh) {
+    card.querySelectorAll("h2,.line").forEach((n) => n.remove());
+    $("empty").style.display = item ? "none" : "";
+    if (!item) return;
+    const h = document.createElement("h2");
+    card.appendChild(h);
+    if (fresh.title) type(h, item.title || ""); else h.textContent = item.title || "";
+    item.lines.forEach((t, i) => {
+      const d = document.createElement("div");
+      d.className = "line" + (i >= fresh.from ? " new" : "");
+      if (i < fresh.from) d.style.animation = "none";
+      d.textContent = t;
+      card.appendChild(d);
+    });
+  }
+
+  window.__rs = {
+    /** payload: { kind, title, items:[{id,title,lines}], focusId, chip } */
+    apply(p) {
+      $("kind").textContent = p.kind || "";
+      if (p.title !== state.title) { state.title = p.title; $("title").textContent = p.title || ""; }
+      const before = state.items.find((x) => x.id === p.focusId);
+      state.items = p.items;
+      const item = p.items.find((x) => x.id === p.focusId) || p.items[p.items.length - 1] || null;
+      const same = shown && item && shown === item.id && before;
+      render(item, { title: !same || (before && before.title !== item.title), from: same ? before.lines.length : 0 });
+      shown = item ? item.id : null;
+      const strip = $("strip");
+      const have = new Set([...strip.children].map((c) => c.dataset.id));
+      p.items.forEach((it, i) => {
+        let t = [...strip.children].find((c) => c.dataset.id === it.id);
+        if (!t) { t = document.createElement("div"); t.className = "thumb"; t.dataset.id = it.id; strip.appendChild(t); }
+        t.innerHTML = "<b>" + (i + 1) + "</b>"; t.appendChild(document.createTextNode(it.title || "…"));
+        t.classList.toggle("cur", it.id === shown);
+        have.delete(it.id);
+      });
+      [...strip.children].forEach((c) => have.has(c.dataset.id) && c.remove());
+      const cur = strip.querySelector(".cur");
+      if (cur) strip.scrollLeft = Math.max(0, cur.offsetLeft - 300);
+      if (p.chip) {
+        $("chip").textContent = p.chip;
+        card.classList.add("hot");
+        clearTimeout(hotTimer);
+        hotTimer = setTimeout(() => card.classList.remove("hot"), 2000);
+      }
+    },
+  };
+})();
+</script>
+</body>
+</html>

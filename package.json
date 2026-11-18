@@ -1,0 +1,16 @@
+{
+  "name": "ride-studio",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Ride Studio — de chez moi à chez eux, formation livrée. Phone PWA + backend + device agent.",
+  "workspaces": ["server", "phone", "agent"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "npm run build -w phone && npm run build -w server",
+    "start": "node server/dist/server/src/index.js",
+    "dev:server": "npm run dev -w server",
+    "dev:phone": "npm run dev -w phone",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w phone && npm run typecheck -w agent"
+  }
+}

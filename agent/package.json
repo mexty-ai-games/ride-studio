@@ -1,0 +1,22 @@
+{
+  "name": "ride-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ride Studio device daemon: runs Claude Agent SDK sessions on this machine with its own Claude Code login.",
+  "bin": { "ride-agent": "dist/agent/src/index.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/agent/src/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.327",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.8.0"
+  }
+}
