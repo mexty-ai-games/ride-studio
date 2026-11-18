@@ -8,6 +8,7 @@ import { BIN_MIC, MIC_RATE, type ChangeEvent, type PhoneToServer, type ServerToP
 import { clearSession, isAuthed, issueSession, limited, requireAuth, safeEqual } from "./auth.js";
 import { config } from "./config.js";
 import { Hub } from "./hub.js";
+import { deleteVideos, diskUsage, recordingsBytes, recordingsRouter, videosOf } from "./recordings.js";
 import { SECRET_NAMES, store, type SecretName } from "./store.js";
 import { openStt, STT_VENDORS, type SttSession, type SttVendor } from "./stt/index.js";
 import { listVoices } from "./tts.js";
@@ -130,6 +131,26 @@ app.get("/api/voices", requireAuth, async (_req, res) => {
   } catch (e) {
     res.status(502).json({ error: (e as Error).message, voices: [] });
   }
+});
+
+// ---- episode library: past episodes and their videos on the volume ----
+app.use("/api/recordings", recordingsRouter((id) => store.episodes.some((e) => e.id === id) || hub.liveEpisodeId === id));
+app.get("/api/episodes", requireAuth, (_req, res) => {
+  res.json({
+    episodes: [...store.episodes].reverse().map((e) => ({ ...e, videos: videosOf(e.id) })),
+    storage: { ...diskUsage(), usedBytes: recordingsBytes() },
+  });
+});
+app.delete("/api/episodes/:id/videos", requireAuth, (req, res) => {
+  deleteVideos(String(req.params.id));
+  res.json({ ok: true });
+});
+app.delete("/api/episodes/:id", requireAuth, (req, res) => {
+  const id = String(req.params.id);
+  if (hub.liveEpisodeId === id && hub.state().episode?.status === "live") return void res.status(409).json({ error: "Épisode en cours" });
+  deleteVideos(id);
+  store.removeEpisode(id);
+  res.json({ ok: true });
 });
 
 // ---- bake-off recordings ----

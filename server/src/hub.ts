@@ -55,7 +55,7 @@ export class Hub {
   private recent: { key: string; ts: number }[] = [];
   private mextySession: { token: string; exp: number } | null = null;
   private mextyOk = false;
-  private episodeNo = store.episodes.length;
+  private episodeNo = Math.max(0, ...store.episodes.map((e) => e.no));
 
   // voice
   private ttsQueue: { id: number; text: string }[] = [];
@@ -228,11 +228,15 @@ export class Hub {
     ep.endedAt = Date.now();
     const front = store.settings.mexty.frontUrl;
     ep.delivered = [...this.targets.values()].map((t) => ({ entity: t.entity, entityId: t.entityId, title: t.title || ENTITY_LABEL[t.entity], url: this.workers.find((w) => w.id === t.workerId)?.runner === "stub" ? undefined : viewerUrl(front, t.entity, t.entityId).replace(/[?&]live=1(&embedded=1)?/, "") }));
-    store.addEpisode({ id: ep.id, no: ep.no, company: ep.setup.company, topic: ep.setup.topic, startedAt: ep.startedAt, endedAt: ep.endedAt, cost: { director: this.cost.director, voice: this.cost.voice, workers: this.cost.workers, total: this.cost.total }, stats: ep.stats, delivered: ep.delivered });
+    store.addEpisode({ id: ep.id, no: ep.no, company: ep.setup.company, topic: ep.setup.topic, destination: ep.setup.destination, etaMin: ep.setup.etaMin, beats: ep.beats, startedAt: ep.startedAt, endedAt: ep.endedAt, cost: { director: this.cost.director, voice: this.cost.voice, workers: this.cost.workers, total: this.cost.total }, stats: ep.stats, delivered: ep.delivered });
     this.stopSpeaking();
     this.pushState();
     // Keep the last frames visible for the outro, then free Chromium.
     setTimeout(() => this.episode === ep && void this.previews.closeAll(), 60_000).unref();
+  }
+
+  get liveEpisodeId() {
+    return this.episode?.id ?? null;
   }
 
   // ---------- budget ----------

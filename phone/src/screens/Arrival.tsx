@@ -13,6 +13,7 @@ export function Arrival() {
   const recording = useApp((x) => x.recording);
   const set = useApp((x) => x.set);
   const [clips, setClips] = useState<Clip[] | null>(null);
+  const uploads = useApp((x) => x.uploads);
   const ep = s?.episode;
 
   useEffect(() => {
@@ -101,6 +102,15 @@ export function Arrival() {
             <div className="flex min-w-0 flex-col gap-1">
               <span className="text-sm font-bold">{clips.length} vidéo{clips.length > 1 ? "s" : ""} prête{clips.length > 1 ? "s" : ""}</span>
               <span className="text-xs leading-snug text-muted">{ep.beats.length ? `${ep.beats.length} moment${ep.beats.length > 1 ? "s" : ""} marqué${ep.beats.length > 1 ? "s" : ""} : ${ep.beats.map((b) => `${fmtClock((b.ts - ep.startedAt) / 1000)} ${b.label}`).join(" · ")}` : "Stockées sur ce téléphone jusqu'aux deux prochains épisodes."}</span>
+              <span className="text-xs font-semibold text-accent-text">{(() => {
+                const mine = Object.entries(uploads).filter(([k]) => k.startsWith(ep.id));
+                if (!mine.length) return "Envoi vers le serveur en attente…";
+                const err = mine.find(([, u]) => u.error)?.[1].error;
+                if (err) return err;
+                if (mine.every(([, u]) => u.done)) return "Sauvegardées sur le serveur : à retrouver dans Épisodes.";
+                const sent = mine.reduce((a, [, u]) => a + u.sent, 0), total = mine.reduce((a, [, u]) => a + u.total, 0);
+                return `Envoi vers le serveur : ${total ? Math.round((sent / total) * 100) : 0} %`;
+              })()}</span>
             </div>
           )}
         </div>

@@ -73,6 +73,7 @@ export function Setup() {
             <h1 className="m-0 font-display text-[34px] font-extrabold leading-none tracking-tight">Où va-t-on aujourd'hui ?</h1>
           </div>
           <div className="flex gap-2">
+            <button onClick={() => set({ screen: "library" })} className="h-11 rounded-full border border-line bg-field px-4 text-sm font-semibold text-text">Épisodes</button>
             <button onClick={() => set({ screen: "bakeoff" })} className="h-11 rounded-full border border-line bg-field px-4 text-sm font-semibold text-text">Test micro</button>
             <button onClick={() => set({ screen: "settings" })} className="h-11 rounded-full border border-line bg-field px-4 text-sm font-semibold text-text">Réglages</button>
           </div>

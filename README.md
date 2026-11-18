@@ -25,6 +25,10 @@ shared/   Wire protocol (phone ↔ server ↔ device)
 - **Change events**: the worker's own MCP tool calls (`server/src/events.ts`) and Mexty's `content:changed` webhook (`POST /api/mexty/events`, HMAC-signed) feed the same bus; duplicates are merged.
 - **Previews**: one headless Chromium page per target opens Mexty's viewer with `?live=1`, logged in with a short service session minted by the Mexty backend. CDP screencast frames are capped at 10 fps per tile and step down in size under back-pressure. If Mexty is not reachable, the tile falls back to a built-in viewer driven by the tool calls.
 
+## Where the videos live
+
+The phone records into its own browser storage first, so a dropped connection never costs footage. When the episode ends, the chunks are sent in order to the server and stored on the volume under `recordings/<episodeId>/`. The upload resumes on its own after a dropped connection or a closed tab. The Épisodes screen lists every past episode with its videos, playable and downloadable from any device; it also shows the space used and lets you delete videos. A 25-minute ride is roughly 1.1 GB in 9:16 plus 0.9 GB in 16:9, so size the volume accordingly.
+
 ## Run it locally
 
 ```bash

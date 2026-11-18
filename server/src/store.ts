@@ -77,6 +77,9 @@ export interface EpisodeRecord {
   no: number;
   company: string;
   topic: string;
+  destination?: string;
+  etaMin?: number;
+  beats?: { label: string; ts: number }[];
   startedAt: number;
   endedAt: number;
   cost: { director: number; voice: number; workers: number; total: number };
@@ -206,6 +209,10 @@ export const store = {
   },
   addEpisode(e: EpisodeRecord) {
     db.episodes.push(e);
+    save();
+  },
+  removeEpisode(id: string) {
+    db.episodes = db.episodes.filter((e) => e.id !== id);
     save();
   },
 };

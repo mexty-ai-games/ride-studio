@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { ChangeEvent, StudioState } from "../../shared/protocol";
 
-export type Screen = "setup" | "live" | "arrival" | "settings" | "bakeoff";
+export type Screen = "setup" | "live" | "arrival" | "settings" | "bakeoff" | "library";
 export interface SttLine {
   vendor: string;
   kind: string;
@@ -25,6 +25,7 @@ interface AppState {
   bakeSaved: { url: string; seconds: number } | null;
   recording: boolean;
   recStartedAt: number;
+  uploads: Record<string, { sent: number; total: number; done: boolean; error?: string }>;
   set: (p: Partial<AppState>) => void;
   error: (m: string) => void;
 }
@@ -52,6 +53,7 @@ export const useApp = create<AppState>((set) => ({
   bakeSaved: null,
   recording: false,
   recStartedAt: 0,
+  uploads: {},
   set,
   error: (m) => set((s) => ({ errors: [...s.errors.slice(-3), m] })),
 }));

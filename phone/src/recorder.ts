@@ -111,3 +111,33 @@ export async function listRecordings(episodeId: string, v: Variant): Promise<str
   d.close();
   return keys.filter((k) => k.startsWith(recId(episodeId, v))).sort();
 }
+
+/** Every recording id still held on this phone. */
+export async function allRecordingIds(): Promise<string[]> {
+  const d = await db();
+  const keys = await new Promise<string[]>((res) => {
+    const out: string[] = [];
+    const cur = d.transaction(STORE).objectStore(STORE).index("rec").openKeyCursor(null, "nextunique");
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) return res(out);
+      out.push(String(c.key));
+      c.continue();
+    };
+    cur.onerror = () => res(out);
+  });
+  d.close();
+  return keys;
+}
+
+/** The chunks of one recording, in order (blobs stay on disk until read). */
+export async function chunksOf(id: string): Promise<{ seq: number; blob: Blob; mime: string }[]> {
+  const d = await db();
+  const rows = await new Promise<{ seq: number; blob: Blob; mime: string }[]>((res, rej) => {
+    const q = d.transaction(STORE).objectStore(STORE).index("rec").getAll(id);
+    q.onsuccess = () => res(q.result);
+    q.onerror = () => rej(q.error);
+  });
+  d.close();
+  return rows.sort((a, b) => a.seq - b.seq);
+}

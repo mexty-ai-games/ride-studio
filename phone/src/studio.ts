@@ -4,6 +4,7 @@ import { Compositor } from "./compositor";
 import { link } from "./link";
 import { Recording, recId, pruneRecordings } from "./recorder";
 import { useApp } from "./store";
+import { autoUpload, syncUploads } from "./uploader";
 
 /** Owns the canvases, the camera element and the recordings for one episode. */
 class Studio {
@@ -90,6 +91,8 @@ class Studio {
     useApp.getState().set({ recording: false });
     this.comp.stop();
     audio.stop();
+    // The ride is over: send the videos to the server so they can be found again later.
+    if (autoUpload.on) void syncUploads();
   }
 
   end() {
