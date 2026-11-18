@@ -103,7 +103,7 @@ export function Settings() {
                 <>
                   <div className="text-xs text-muted">Sur la machine à associer (valable 10 minutes, un seul appareil) :</div>
                   <div className="my-1 font-display text-4xl font-extrabold tracking-[0.2em]">{pair.code}</div>
-                  <code className="block select-all break-all text-xs">npx ride-agent pair {pair.code} --server {server}</code>
+                  <code className="block select-all break-all text-xs">node agent/dist/agent/src/index.js pair {pair.code} --server {server}</code>
                 </>
               ) : (
                 <button onClick={() => void api<typeof pair>("/api/devices/pair-code", { method: "POST" }).then(setPair)} className="mx-grad h-11 rounded-full border-0 px-5 text-sm font-bold text-white">Associer un appareil</button>
