@@ -46,6 +46,7 @@ class Studio {
     this.comp.cam = this.camEl;
     await Promise.all([document.fonts.load("800 60px 'Bricolage Grotesque'"), document.fonts.load("600 30px Inter")]).catch(() => {});
     this.comp.start();
+    void birds.startAmbience();
   }
 
   async topChrono(setup: EpisodeSetup) {

@@ -16,6 +16,7 @@ const hz = (d: number) => C6 * 2 ** ((12 * Math.floor(d / 5) + SCALE[((d % 5) + 
 
 const GRID = 0.14; // seconds between two notes
 const VOLUME = 0.2;
+const AMBIENCE = 0.35; // relative to the notes: present, never in the way of the voices
 
 type Voice = "chirp" | "whistle" | "trill" | "peck" | "coo";
 const BIRD: Record<Entity, { voice: Voice; base: number }> = {
@@ -132,6 +133,43 @@ class Birds {
   reset() {
     this.count.clear();
     this.open.clear();
+  }
+
+  private ambience: AudioBuffer | null = null;
+  private ambienceTimer = 0;
+  /**
+   * A very quiet bed of real birdsong under the notes (generated once with ElevenLabs, shipped with the app).
+   * Looped by overlapping two copies with a crossfade, so there is no audible seam.
+   */
+  async startAmbience() {
+    const n = this.node();
+    if (!n) return;
+    try {
+      this.ambience ??= await n.ctx.decodeAudioData(await (await fetch("/birds-ambience.mp3")).arrayBuffer());
+    } catch {
+      return; // the notes work without it
+    }
+    const buf = this.ambience;
+    const FADE = 2.5;
+    const bed = n.ctx.createGain();
+    bed.gain.value = AMBIENCE;
+    bed.connect(n.out);
+    const play = (at: number) => {
+      if (audio.ctx !== n.ctx) return; // the episode ended
+      const src = n.ctx.createBufferSource();
+      const g = n.ctx.createGain();
+      src.buffer = buf;
+      src.connect(g).connect(bed);
+      g.gain.setValueAtTime(0, at);
+      g.gain.linearRampToValueAtTime(1, at + FADE);
+      g.gain.setValueAtTime(1, at + buf.duration - FADE);
+      g.gain.linearRampToValueAtTime(0, at + buf.duration);
+      src.start(at);
+      const next = at + buf.duration - FADE;
+      this.ambienceTimer = window.setTimeout(() => play(next), Math.max(0, (next - n.ctx.currentTime - 1) * 1000));
+    };
+    window.clearTimeout(this.ambienceTimer);
+    play(n.ctx.currentTime + 0.1);
   }
 }
 
