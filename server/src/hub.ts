@@ -93,11 +93,13 @@ export class Hub {
       status: () => this.statusText(),
       setLayout: (mode) => ((this.layout = mode), (this.focus = null), this.pushState(), `Disposition : ${mode}.`),
       focusTile: (n) => {
-        const tile = n == null ? null : this.tiles().find((t) => t.workerNo === n);
-        if (n != null && !tile) return `Aucun aperçu pour le chantier ${n}.`;
+        // Screens are numbered as they appear at the picture: screen n is tile slot n-1.
+        const tiles = this.tiles();
+        const tile = n == null ? null : tiles.find((t) => t.slot === n - 1);
+        if (n != null && !tile) return `Erreur : pas d'écran ${n}. ${this.screensText()}`;
         this.focus = tile ? tile.slot : null;
         this.pushState();
-        return tile ? `Aperçu ${n} en plein écran.` : "Retour à la disposition normale.";
+        return tile ? `Écran ${n} en plein écran.` : "Tous les écrans sont visibles.";
       },
       markBeat: (label) => {
         if (!this.episode) return "Aucun épisode en cours.";
@@ -186,14 +188,21 @@ export class Hub {
       speaking: this.speaking,
     };
   }
+  /** What is on each screen, in the words the rider uses ("le deuxième écran"). */
+  private screensText(): string {
+    const list = [...this.targets.values()].filter((t) => t.slot != null).sort((a, b) => a.slot! - b.slot!);
+    return list.length ? `Écrans à l'image : ${list.map((t) => `écran ${t.slot! + 1} = ${this.nameOf(t)}${t.title ? ` (« ${t.title.slice(0, 40)} »)` : ""}`).join(" ; ")}.` : "Aucun écran à l'image pour l'instant.";
+  }
+
   private statusText(): string {
     if (!this.episode) return "Aucun épisode en cours.";
     const left = Math.max(0, this.episode.setup.etaMin * 60 - (Date.now() - this.episode.startedAt) / 1000);
     const lines = [`Temps restant : ${Math.floor(left / 60)} min ${Math.floor(left % 60)} s. Dépense : ${this.cost.total.toFixed(2)} $ sur ${this.cost.cap} $.`];
     for (const w of this.workers) {
       const names = [...this.targets.values()].filter((t) => t.workerId === w.id).map((t) => this.nameOf(t)).join(", ");
-      lines.push(`Chantier ${w.no}${names ? ` (${names})` : ""} : ${w.status === "running" ? "en cours" : w.status === "done" ? "terminé" : w.status}, ${w.changes} changements. Brief : ${w.brief.slice(0, 120)}`);
+      lines.push(`Demande ${w.no}${names ? ` (${names})` : ""} : ${w.status === "running" ? "en cours" : w.status === "done" ? "terminé" : w.status}, ${w.changes} changements. Brief : ${w.brief.slice(0, 120)}`);
     }
+    lines.push(this.screensText());
     const s = this.episode.stats;
     lines.push(`Total : ${s.slides} écrans, ${s.questions} questions, ${s.nodes} étapes de parcours, ${s.objects} objets 3D.`);
     return lines.join("\n");
@@ -335,19 +344,19 @@ export class Hub {
     if (this.cost.capped) return "Erreur : plafond de dépense atteint, aucun nouveau travail n'est lancé.";
     if (target != null) {
       const w = this.workers.find((x) => x.no === target);
-      if (!w) return `Erreur : pas de chantier ${target}. Chantiers : ${this.workers.map((x) => x.no).join(", ") || "aucun"}.`;
+      if (!w) return `Erreur : pas de demande numéro ${target}. Numéros existants : ${this.workers.map((x) => x.no).join(", ") || "aucun"}.`;
       if (w.status === "running" || w.status === "queued") {
         w.queue.push(brief);
-        return `Demande ajoutée à la suite du chantier ${w.no}.`;
+        return "OK, ajouté.";
       }
       this.launch(w, brief);
-      return `Chantier ${w.no} relancé avec le même contexte.`;
+      return "OK, relancé.";
     }
-    if (this.workers.filter((w) => w.status === "running" || w.status === "queued").length >= 6) return "Erreur : trop de chantiers en parallèle. Poursuis un chantier existant avec target.";
+    if (this.workers.filter((w) => w.status === "running" || w.status === "queued").length >= 6) return "Erreur : trop de contenus en parallèle. Poursuis un contenu existant avec target.";
     const w: Worker = { id: randomUUID(), no: this.workers.length + 1, brief, runner: "stub", status: "queued", step: "", changes: 0, costUsd: 0, startedAt: Date.now(), pendingCalls: new Map(), queue: [], costBase: 0 };
     this.workers.push(w);
     this.launch(w, brief);
-    return `Chantier ${w.no} lancé.`;
+    return `OK, lancé (numéro ${w.no}).`;
   }
 
   private launch(w: Worker, brief: string) {
@@ -480,7 +489,25 @@ export class Hub {
     if (!t) {
       t = { key, entity: ev.entity, entityId: ev.entityId, workerId: w.id, title: title ?? "", doc: { title: title ?? "", items: [] }, slot: null, propsId: ev.path.propsId };
       this.targets.set(key, t);
-      void this.openTile(t).then(() => this.broadcast({ t: "cue", kind: "started", entity: t!.entity, slot: t!.slot }));
+      const siblings = [...this.targets.values()].filter((x) => x.workerId === w.id && x !== t);
+      if (ev.entity === "scene") {
+        // A scene game is a block plus its scene. The block viewer only shows the last built version (a blank
+        // world while the scene is being edited), so the scene editor takes its place on screen.
+        for (const b of siblings) {
+          if (b.entity !== "block" || b.slot == null) continue;
+          if (this.focus === b.slot) this.focus = null;
+          void this.previews.close(b.slot);
+          b.slot = null;
+        }
+      }
+      if (ev.entity === "block" && siblings.some((x) => x.entity === "scene")) {
+        // Same game, scene already on screen: no second tile.
+      } else {
+        void this.openTile(t).then(() => {
+          this.broadcast({ t: "cue", kind: "started", entity: t!.entity, slot: t!.slot });
+          this.director.note(`Nouvel écran à l'image. ${this.screensText()}`);
+        });
+      }
     }
     if (title) t.title = t.doc.title = title;
 
@@ -516,7 +543,7 @@ export class Hub {
         for (const l of lines) if (!item.lines.includes(l)) item.lines.push(l);
       }
     }
-    if (t.slot != null) void this.previews.mock(t.slot, { kind: `CLAUDE ${w.no} · ${ENTITY_LABEL[t.entity]}`, title: t.doc.title, items: t.doc.items, focusId: itemId, chip: ev.op === "create" ? "+ ajouté" : ev.op === "delete" ? "supprimé" : "modifié" });
+    if (t.slot != null) void this.previews.mock(t.slot, { kind: `ÉCRAN ${t.slot + 1} · ${ENTITY_LABEL[t.entity]}`, title: t.doc.title, items: t.doc.items, focusId: itemId, chip: ev.op === "create" ? "+ ajouté" : ev.op === "delete" ? "supprimé" : "modifié" });
 
     this.broadcast({ t: "change", event: ev, slot: t.slot });
     this.pushState();
@@ -591,7 +618,7 @@ export class Hub {
     }
     try {
       await this.previews.open(slot, opts);
-      if (t.slot === slot) await this.previews.mock(slot, { kind: `CLAUDE ${w?.no ?? ""} · ${ENTITY_LABEL[t.entity]}`, title: t.doc.title, items: t.doc.items, focusId: t.doc.items.at(-1)?.id });
+      if (t.slot === slot) await this.previews.mock(slot, { kind: `ÉCRAN ${slot + 1} · ${ENTITY_LABEL[t.entity]}`, title: t.doc.title, items: t.doc.items, focusId: t.doc.items.at(-1)?.id });
     } catch (e) {
       console.warn("[preview] open failed:", (e as Error).message);
     }

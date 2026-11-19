@@ -59,6 +59,13 @@ export class PreviewRenderer {
     await this.close(slot);
     const browser = await this.launch();
     const context = await browser.newContext({ viewport: { width: SIZES[0].w, height: SIZES[0].h }, deviceScaleFactor: 1, locale: "fr-FR", colorScheme: "light" });
+    // The page is being filmed: Mexty's first-visit tour and first-run card must not sit over the content.
+    await context.addInitScript(() => {
+      const get = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (key: string) {
+        return key === "edv-editor-tour-v1" || key.startsWith("edv-editor-firstrun-closed:") ? "1" : get.call(this, key);
+      };
+    });
     const page = await context.newPage();
     let mode: "mexty" | "mock" = "mock";
     if (opts.url) {

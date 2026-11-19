@@ -35,12 +35,12 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "dispatch_task",
     description:
-      "Lance la construction d'un contenu Mexty réel (parcours, cours, évaluation, activité ou scène 3D EdVerse). Revient immédiatement. Sans `target` : nouveau chantier, en parallèle des autres. Avec `target` = numéro d'un chantier existant : même chantier, même contexte (ex. « rends le quiz plus dur »). Un contenu par chantier : deux cours = deux appels. Le brief doit être autonome : entreprise, public, sujet, ce qui est attendu, langue.",
-    input_schema: { type: "object", properties: { brief: { type: "string" }, target: { type: "integer", description: "Numéro du chantier à poursuivre" } }, required: ["brief"], additionalProperties: false },
+      "Lance la construction d'un contenu Mexty réel (parcours, cours, évaluation, activité ou scène 3D EdVerse). Revient immédiatement. Sans `target` : nouveau contenu, en parallèle des autres. Avec `target` = le numéro rendu au lancement : on poursuit ce contenu avec le même contexte (ex. « rends le quiz plus dur »). Un contenu par appel : deux cours = deux appels. Le brief doit être autonome : entreprise, public, sujet, ce qui est attendu, langue.",
+    input_schema: { type: "object", properties: { brief: { type: "string" }, target: { type: "integer", description: "Numéro rendu au lancement du contenu à poursuivre" } }, required: ["brief"], additionalProperties: false },
   },
-  { name: "get_status", description: "Avancement des chantiers, temps restant et budget.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "get_status", description: "Avancement des contenus, liste des écrans à l'image, temps restant et budget.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "set_layout", description: "Disposition des aperçus dans la vidéo.", input_schema: { type: "object", properties: { mode: { type: "string", enum: ["auto", "single", "split", "grid"] } }, required: ["mode"], additionalProperties: false } },
-  { name: "focus_tile", description: "Met un aperçu en plein écran (n = numéro du chantier), ou n = 0 pour revenir à la disposition normale.", input_schema: { type: "object", properties: { n: { type: "integer" } }, required: ["n"], additionalProperties: false } },
+  { name: "focus_tile", description: "Met un écran en plein écran. n = numéro de l'écran tel qu'il est à l'image (écran 1, écran 2…, « le deuxième » = 2), ou n = 0 pour revoir tous les écrans (la grille). Les événements et get_status disent quel contenu est sur quel écran : si Fabien nomme un contenu (« la scène 3D », « le système solaire »), choisis l'écran qui le porte.", input_schema: { type: "object", properties: { n: { type: "integer" } }, required: ["n"], additionalProperties: false } },
   { name: "mark_beat", description: "Marque un moment fort de la vidéo (pour le montage), avec un libellé court.", input_schema: { type: "object", properties: { label: { type: "string" } }, required: ["label"], additionalProperties: false } },
 ];
 
@@ -49,11 +49,12 @@ const SYSTEM = `Tu es la voix de « Ride Studio ». Fabien, fondateur de Mexty, 
 Ta voix est entendue dans la vidéo. Règles :
 - Extrêmement brève : une seule phrase, dix mots au plus. « C'est parti. » « Deux cours lancés. » « Compris, je durcis le quiz. »
 - Français. Pas de listes, pas de markdown, pas d'émojis, pas d'identifiants.
-- Ne parle jamais de « worker », d'« agent », de « chantier », de « tâche » ni de technique. Parle des contenus : le cours, le quiz, le parcours.
+- Ne parle jamais de « worker », d'« agent », de « chantier », de « tâche », de « demande » ni de technique. Parle des contenus : le cours, le quiz, le parcours, la scène.
 - N'explique pas ce que tu vas faire, ne résume pas, ne pose pas de question si tu peux agir. Si tu n'as pas compris : « Tu peux répéter ? »
 - Fabien conduit : ne lui demande jamais de regarder ou de toucher l'écran.
-- Pour tout travail de contenu, appelle dispatch_task puis confirme en quelques mots. Une demande qui modifie un contenu en cours va au même chantier (target). Un contenu différent va à un nouveau chantier.
+- Pour tout travail de contenu, appelle dispatch_task puis confirme en quelques mots. Une demande qui modifie un contenu en cours reprend ce contenu (target). Un contenu différent est un nouvel appel sans target.
 - Dès que Fabien donne l'entreprise, la destination, la durée du trajet ou le sujet, appelle set_episode.
+- Il peut y avoir plusieurs écrans à l'image. Ne dis jamais combien il y en a sans l'avoir vérifié dans les événements ou avec get_status. Si focus_tile échoue, appelle get_status et réessaie avec le bon numéro.
 - N'annonce jamais toi-même qu'un contenu est terminé : le studio le dit à ta place (« Cours 1 terminé. »). Ne prétends jamais qu'un contenu existe.
 - Les messages entre crochets [événements] viennent du studio, pas de Fabien. Réponds exactement « … », sauf s'ils te demandent explicitement de prévenir Fabien : alors une phrase très courte.`;
 

@@ -345,7 +345,7 @@ export class Compositor {
     // Label: which Claude, which kind of content
     const fs = Math.max(13, Math.round(Math.min(22 * u, r.w * 0.034)));
     ctx.font = `700 ${fs}px ${SANS}`;
-    const label = `CLAUDE ${t.workerNo} · ${ENTITY[t.entity] ?? ""}`;
+    const label = `ÉCRAN ${t.slot + 1} · ${ENTITY[t.entity] ?? ""}`;
     const lw = ctx.measureText(label).width + fs * 2.2;
     const lr = { x: r.x + fs * 0.7, y: r.y + r.h - fs * 2.5, w: lw, h: fs * 1.9 };
     rr(ctx, lr, lr.h / 2);
