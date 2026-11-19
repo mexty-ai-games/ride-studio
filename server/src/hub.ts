@@ -74,14 +74,23 @@ export class Hub {
     () => store.secret("anthropic"),
     () => store.settings.claude.directorModel,
     {
-      startEpisode: (s) => (this.episode?.status === "live" ? "Un épisode est déjà en cours." : (this.startEpisode({ ...this.defaultSetup(), ...Object.fromEntries(Object.entries(s).filter(([, v]) => v)) } as EpisodeSetup), "Épisode démarré, chrono lancé, premier worker lancé.")),
+      setEpisode: (p) => {
+        const ep = this.episode;
+        if (!ep || ep.status !== "live") return "Aucun épisode en cours.";
+        if (p.company) ep.setup.company = p.company.slice(0, 120);
+        if (p.destination) ep.setup.destination = p.destination.slice(0, 120);
+        if (p.topic) ep.setup.topic = p.topic.slice(0, 300);
+        if (p.etaMin) ep.setup.etaMin = Math.min(600, Math.max(1, Math.round(p.etaMin)));
+        this.pushState();
+        return "Noté.";
+      },
       endEpisode: () => (this.endEpisode(), "Épisode terminé."),
       dispatch: (brief, target) => this.dispatch(brief, target),
       status: () => this.statusText(),
       setLayout: (mode) => ((this.layout = mode), (this.focus = null), this.pushState(), `Disposition : ${mode}.`),
       focusTile: (n) => {
         const tile = n == null ? null : this.tiles().find((t) => t.workerNo === n);
-        if (n != null && !tile) return `Aucun aperçu pour le worker ${n}.`;
+        if (n != null && !tile) return `Aucun aperçu pour le chantier ${n}.`;
         this.focus = tile ? tile.slot : null;
         this.pushState();
         return tile ? `Aperçu ${n} en plein écran.` : "Retour à la disposition normale.";
@@ -176,7 +185,10 @@ export class Hub {
     if (!this.episode) return "Aucun épisode en cours.";
     const left = Math.max(0, this.episode.setup.etaMin * 60 - (Date.now() - this.episode.startedAt) / 1000);
     const lines = [`Temps restant : ${Math.floor(left / 60)} min ${Math.floor(left % 60)} s. Dépense : ${this.cost.total.toFixed(2)} $ sur ${this.cost.cap} $.`];
-    for (const w of this.workers) lines.push(`Worker ${w.no} (${w.runner}) : ${w.status}, ${w.changes} changements, dernière étape : ${w.step || "démarrage"}. Brief : ${w.brief.slice(0, 120)}`);
+    for (const w of this.workers) {
+      const names = [...this.targets.values()].filter((t) => t.workerId === w.id).map((t) => this.nameOf(t)).join(", ");
+      lines.push(`Chantier ${w.no}${names ? ` (${names})` : ""} : ${w.status === "running" ? "en cours" : w.status === "done" ? "terminé" : w.status}, ${w.changes} changements. Brief : ${w.brief.slice(0, 120)}`);
+    }
     const s = this.episode.stats;
     lines.push(`Total : ${s.slides} écrans, ${s.questions} questions, ${s.nodes} étapes de parcours, ${s.objects} objets 3D.`);
     return lines.join("\n");
@@ -205,17 +217,11 @@ export class Hub {
     };
     const e = this.episode.setup;
     this.director.reset(
-      `Épisode ${this.episode.no} démarré. Entreprise : ${e.company || "non précisée"}. Destination : ${e.destination || "non précisée"}. Trajet estimé : ${e.etaMin} minutes. Formation à livrer : ${e.topic || "à définir avec Fabien"}. Modèle de départ : ${e.template}. Plafond : ${cap} $. ` +
-        (e.topic ? "Le worker 1 vient d'être lancé sur cette formation. " : "Aucun worker n'est encore lancé : attends le brief de Fabien. ") +
-        "Fabien va faire son accroche face caméra : ne parle pas avant qu'il s'adresse à toi.",
+      `Épisode ${this.episode.no} démarré. ` +
+        [e.company && `Entreprise : ${e.company}.`, e.destination && `Destination : ${e.destination}.`, e.topic && `Formation à livrer : ${e.topic}.`].filter(Boolean).join(" ") +
+        ` Trajet estimé : ${e.etaMin} minutes. Plafond : ${cap} $. Rien n'est lancé : Fabien va te dire quoi construire.`,
     );
-    if (e.topic) {
-      this.dispatch(
-        `Construis une formation Mexty complète pour l'entreprise « ${e.company || "le client"} »${e.destination ? ` (${e.destination})` : ""}. Sujet : ${e.topic}. ` +
-          (e.template && e.template !== "Vierge" ? `Pars de la série de modèles « ${e.template} » (list_course_template_series) pour l'habillage. ` : "") +
-          `Livrable : un cours de 6 à 8 écrans en français, concret et adapté au terrain, prêt à être publié. Le trajet dure ${e.etaMin} minutes : vise un résultat complet et montrable bien avant la fin.`,
-      );
-    }
+    this.announce("J'attends tes ordres, Fabien.");
     void this.checkMexty();
     this.pushState();
   }
@@ -249,12 +255,12 @@ export class Hub {
     if (this.episode?.status === "live") {
       if (!c.warned && c.total >= c.cap * 0.8) {
         c.warned = true;
-        this.director.event(`Budget : ${c.total.toFixed(2)} $ dépensés, soit 80 % du plafond de ${c.cap} $. Préviens Fabien en une phrase.`);
+        this.director.event(`Budget : ${c.total.toFixed(2)} $ dépensés, soit 80 % du plafond de ${c.cap} $. Préviens Fabien en une phrase très courte.`);
       }
       if (!c.capped && c.total >= c.cap) {
         c.capped = true;
         for (const w of this.workers) this.stopWorker(w, "stopped");
-        this.director.event(`Plafond de ${c.cap} $ atteint : tous les workers ont été arrêtés proprement. Dis-le à Fabien.`);
+        this.director.event(`Plafond de ${c.cap} $ atteint : tout le travail en cours a été arrêté. Préviens Fabien en une phrase très courte.`);
       }
     }
     this.pushState();
@@ -318,23 +324,23 @@ export class Hub {
 
   // ---------- workers ----------
   dispatch(brief: string, target?: number): string {
-    if (!this.episode || this.episode.status !== "live") return "Erreur : aucun épisode en cours. Démarre l'épisode d'abord.";
+    if (!this.episode || this.episode.status !== "live") return "Erreur : aucun épisode en cours.";
     if (this.cost.capped) return "Erreur : plafond de dépense atteint, aucun nouveau travail n'est lancé.";
     if (target != null) {
       const w = this.workers.find((x) => x.no === target);
-      if (!w) return `Erreur : pas de worker ${target}. Workers : ${this.workers.map((x) => x.no).join(", ") || "aucun"}.`;
+      if (!w) return `Erreur : pas de chantier ${target}. Chantiers : ${this.workers.map((x) => x.no).join(", ") || "aucun"}.`;
       if (w.status === "running" || w.status === "queued") {
         w.queue.push(brief);
-        return `Demande ajoutée à la suite du worker ${w.no} (il termine son étape en cours).`;
+        return `Demande ajoutée à la suite du chantier ${w.no}.`;
       }
       this.launch(w, brief);
-      return `Worker ${w.no} relancé avec le même contexte.`;
+      return `Chantier ${w.no} relancé avec le même contexte.`;
     }
-    if (this.workers.filter((w) => w.status === "running" || w.status === "queued").length >= 6) return "Erreur : trop de workers en parallèle. Poursuis un worker existant avec target.";
+    if (this.workers.filter((w) => w.status === "running" || w.status === "queued").length >= 6) return "Erreur : trop de chantiers en parallèle. Poursuis un chantier existant avec target.";
     const w: Worker = { id: randomUUID(), no: this.workers.length + 1, brief, runner: "stub", status: "queued", step: "", changes: 0, costUsd: 0, startedAt: Date.now(), pendingCalls: new Map(), queue: [], costBase: 0 };
     this.workers.push(w);
     this.launch(w, brief);
-    return `Worker ${w.no} lancé (${w.runner === "device" ? `sur ${w.deviceName}` : w.runner === "cloud" ? "dans le cloud" : "mode démo"}).`;
+    return `Chantier ${w.no} lancé.`;
   }
 
   private launch(w: Worker, brief: string) {
@@ -361,7 +367,7 @@ export class Hub {
         // Real runners exist but are all busy: do not silently fake the work.
         w.status = "error";
         w.error = "Tous les appareils sont occupés et le cloud est désactivé";
-        this.director.event(`Le worker ${w.no} n'a pas pu démarrer : appareils occupés.`);
+        this.announce("Impossible de lancer ça pour l'instant.");
       } else {
         w.runner = "stub";
         w.running = this.stub.run(spec, emit);
@@ -369,7 +375,7 @@ export class Hub {
     } else {
       w.status = "error";
       w.error = "L'appareil qui porte cette session est hors ligne";
-      this.director.event(`Le worker ${w.no} ne peut pas reprendre : son appareil est hors ligne.`);
+      this.announce("Impossible de reprendre ce contenu pour l'instant.");
     }
     this.pushState();
   }
@@ -415,14 +421,14 @@ export class Hub {
           if (!e.ok) w.error = e.summary;
           const next = w.queue.shift();
           if (next && e.ok && !this.cost.capped && this.episode?.status === "live") this.launch(w, next);
-          else this.director.event(e.ok ? `Le worker ${w.no} a terminé. Résumé : ${e.summary.slice(0, 300)}` : `Le worker ${w.no} s'est arrêté sur une erreur : ${e.summary.slice(0, 200)}`);
+          else this.announceDone(w, e.ok);
         }
         break;
       case "error":
         if (w.status === "running") {
           w.status = "error";
           w.error = e.message;
-          this.director.event(`Le worker ${w.no} a rencontré une erreur : ${e.message.slice(0, 200)}`);
+          this.announceDone(w, false);
         }
         break;
     }
@@ -488,22 +494,29 @@ export class Hub {
     if (t.slot != null) void this.previews.mock(t.slot, { kind: `CLAUDE ${w.no} · ${ENTITY_LABEL[t.entity]}`, title: t.doc.title, items: t.doc.items, focusId: itemId, chip: ev.op === "create" ? "+ ajouté" : ev.op === "delete" ? "supprimé" : "modifié" });
 
     this.broadcast({ t: "change", event: ev, slot: t.slot });
-    this.milestones(ep, w, ev);
     this.pushState();
   }
 
-  private announced = new Set<string>();
-  private milestones(ep: EpisodeState, w: Worker, ev: ChangeEvent) {
-    const once = (k: string, text: string) => {
-      const id = `${ep.id}:${k}`;
-      if (this.announced.has(id)) return;
-      this.announced.add(id);
-      this.director.event(text);
-    };
-    if (ev.op === "create" && ev.path.slideId && ep.stats.slides === 1) once("slide1", "Le premier écran du cours vient d'apparaître à l'image.");
-    if (ev.op === "create" && ev.path.stepId && ep.stats.questions === 1) once("q1", "La première question de l'évaluation vient d'apparaître.");
-    if (ev.entity === "scene" && ep.stats.objects === 1) once("o1", "Le premier objet 3D vient d'apparaître dans la scène.");
-    if (ev.op === "create" && ev.path.slideId && ep.stats.slides > 1 && ep.stats.slides % 4 === 0) once(`s${ep.stats.slides}`, `Le worker ${w.no} en est à ${ep.stats.slides} écrans.`);
+  /** What a piece of content is called aloud: "Cours 2", "Programme d'étude", "Évaluation 1". */
+  private nameOf(t: Target): string {
+    const same = [...this.targets.values()].filter((x) => x.entity === t.entity);
+    const n = same.indexOf(t) + 1;
+    const noun = { course: "Cours", program: "Programme d'étude", evaluation: "Évaluation", block: "Activité", scene: "Scène 3D" }[t.entity];
+    return t.entity === "program" && same.length === 1 ? noun : `${noun} ${n}`;
+  }
+  /** The studio's own voice: a fixed, very short line, said as is (no model in between). */
+  private announce(text: string) {
+    this.director.note(`Le studio a dit à Fabien : « ${text} »`);
+    this.say(text);
+  }
+  /** The only progress report the rider gets: "Cours 1 terminé." */
+  private announceDone(w: Worker, ok: boolean) {
+    const mine = [...this.targets.values()].filter((t) => t.workerId === w.id);
+    if (!ok) return this.announce(mine.length ? `${this.nameOf(mine.at(-1)!)} : erreur.` : "Une demande a échoué.");
+    // Containers a course task only touched in passing (its own blocks) are not announced one by one.
+    const main = mine.filter((t) => t.entity !== "block" || mine.every((x) => x.entity === "block"));
+    if (!main.length) return this.announce("C'est fait.");
+    for (const t of main) this.announce(`${this.nameOf(t)} terminé${t.entity === "evaluation" || t.entity === "block" || t.entity === "scene" ? "e" : ""}.`);
   }
 
   // ---------- tiles / previews ----------

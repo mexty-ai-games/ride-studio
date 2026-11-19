@@ -14,7 +14,7 @@ export function tokenCost(model: string, u: { input_tokens?: number | null; outp
 
 /** What the director can do. Every call returns at once: the director never waits on work. */
 export interface DirectorActions {
-  startEpisode(setup: Partial<EpisodeSetup>): string;
+  setEpisode(setup: Partial<EpisodeSetup>): string;
   endEpisode(): string;
   dispatch(brief: string, target?: number): string;
   status(): string;
@@ -24,31 +24,36 @@ export interface DirectorActions {
 }
 
 const TOOLS: Anthropic.Tool[] = [
-  { name: "start_episode", description: "Démarre l'épisode et le chrono. À n'appeler que si aucun épisode n'est en cours.", input_schema: { type: "object", properties: { company: { type: "string" }, destination: { type: "string" }, eta_min: { type: "number" }, topic: { type: "string" } }, required: ["company", "topic"], additionalProperties: false } },
-  { name: "end_episode", description: "Termine l'épisode : arrête les workers et l'enregistrement. À l'arrivée, ou si Fabien le demande.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
+  {
+    name: "set_episode",
+    description: "Enregistre ce que Fabien vient de dire sur l'épisode : entreprise, destination, durée du trajet, formation à livrer. À appeler dès qu'il donne l'une de ces informations (le chrono et le titre à l'image en dépendent).",
+    input_schema: { type: "object", properties: { company: { type: "string" }, destination: { type: "string" }, eta_min: { type: "number" }, topic: { type: "string" } }, additionalProperties: false },
+  },
+  { name: "end_episode", description: "Termine l'épisode et l'enregistrement. À l'arrivée, ou si Fabien le demande.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   {
     name: "dispatch_task",
     description:
-      "Confie un travail à un worker Claude Code qui construit du contenu Mexty réel (parcours, cours, évaluation, bloc ou scène 3D EdVerse). Revient immédiatement. Sans `target` : nouveau worker en parallèle. Avec `target` = numéro d'un worker existant : même worker, même contexte (ex. « rends le quiz plus dur »). Le brief doit être autonome : entreprise, public, sujet, ce qui est attendu, langue.",
-    input_schema: { type: "object", properties: { brief: { type: "string" }, target: { type: "integer", description: "Numéro du worker à poursuivre (CLAUDE n)" } }, required: ["brief"], additionalProperties: false },
+      "Lance la construction d'un contenu Mexty réel (parcours, cours, évaluation, activité ou scène 3D EdVerse). Revient immédiatement. Sans `target` : nouveau chantier, en parallèle des autres. Avec `target` = numéro d'un chantier existant : même chantier, même contexte (ex. « rends le quiz plus dur »). Un contenu par chantier : deux cours = deux appels. Le brief doit être autonome : entreprise, public, sujet, ce qui est attendu, langue.",
+    input_schema: { type: "object", properties: { brief: { type: "string" }, target: { type: "integer", description: "Numéro du chantier à poursuivre" } }, required: ["brief"], additionalProperties: false },
   },
-  { name: "get_status", description: "État des workers, de l'avancement, du temps restant et du budget.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "get_status", description: "Avancement des chantiers, temps restant et budget.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "set_layout", description: "Disposition des aperçus dans la vidéo.", input_schema: { type: "object", properties: { mode: { type: "string", enum: ["auto", "single", "split", "grid"] } }, required: ["mode"], additionalProperties: false } },
-  { name: "focus_tile", description: "Met un aperçu en plein écran pour un moment clé (n = numéro du worker), ou n = 0 pour revenir à la disposition normale.", input_schema: { type: "object", properties: { n: { type: "integer" } }, required: ["n"], additionalProperties: false } },
+  { name: "focus_tile", description: "Met un aperçu en plein écran (n = numéro du chantier), ou n = 0 pour revenir à la disposition normale.", input_schema: { type: "object", properties: { n: { type: "integer" } }, required: ["n"], additionalProperties: false } },
   { name: "mark_beat", description: "Marque un moment fort de la vidéo (pour le montage), avec un libellé court.", input_schema: { type: "object", properties: { label: { type: "string" } }, required: ["label"], additionalProperties: false } },
 ];
 
-const SYSTEM = `Tu es la co-animatrice vocale de « Ride Studio », une série vidéo quotidienne. Fabien, fondateur de Mexty, roule à moto et te parle au casque. Pendant le trajet, des workers Claude Code construisent une vraie formation Mexty pour l'entreprise chez qui il arrive ; l'écran du téléphone montre chaque changement en direct et tout est enregistré.
+const SYSTEM = `Tu es la voix de « Ride Studio ». Fabien, fondateur de Mexty, roule à moto et te parle au casque. Il te dit quoi construire sur Mexty ; tu lances le travail avec tes outils, l'écran montre le contenu se construire en direct, et tout est filmé.
 
 Ta voix est entendue dans la vidéo. Règles :
-- Français par défaut, ton de co-animatrice : vive, chaleureuse, précise, jamais scolaire.
-- Deux phrases maximum par réponse. Phrases courtes, faites pour être dites à voix haute : pas de listes, pas de markdown, pas d'émojis, pas d'identifiants techniques.
-- Fabien conduit : ne lui demande jamais de regarder ou de toucher l'écran. Tout passe par la voix.
-- Tu ne bloques jamais : pour tout travail de contenu, appelle dispatch_task puis confirme en une phrase. Ne prétends jamais qu'un contenu existe tant qu'un événement ne l'a pas confirmé.
-- Une demande qui modifie un contenu en cours va au même worker (target). Un contenu différent (ex. une évaluation en plus du cours) va à un nouveau worker, en parallèle.
-- Les messages entre crochets [événements] viennent du studio, pas de Fabien : annonce l'essentiel en une phrase naturelle, comme un commentaire en direct, ou reste silencieuse en répondant exactement « … » si ce n'est pas intéressant ou si tu viens déjà d'en parler.
-- Pour un moment marquant (premier écran, quiz terminé, scène 3D qui apparaît), pense à focus_tile et mark_beat.
-- Si tu n'as pas compris, demande de répéter en quelques mots. Si le budget est atteint, dis-le simplement.`;
+- Extrêmement brève : une seule phrase, dix mots au plus. « C'est parti. » « Deux cours lancés. » « Compris, je durcis le quiz. »
+- Français. Pas de listes, pas de markdown, pas d'émojis, pas d'identifiants.
+- Ne parle jamais de « worker », d'« agent », de « chantier », de « tâche » ni de technique. Parle des contenus : le cours, le quiz, le parcours.
+- N'explique pas ce que tu vas faire, ne résume pas, ne pose pas de question si tu peux agir. Si tu n'as pas compris : « Tu peux répéter ? »
+- Fabien conduit : ne lui demande jamais de regarder ou de toucher l'écran.
+- Pour tout travail de contenu, appelle dispatch_task puis confirme en quelques mots. Une demande qui modifie un contenu en cours va au même chantier (target). Un contenu différent va à un nouveau chantier.
+- Dès que Fabien donne l'entreprise, la destination, la durée du trajet ou le sujet, appelle set_episode.
+- N'annonce jamais toi-même qu'un contenu est terminé : le studio le dit à ta place (« Cours 1 terminé. »). Ne prétends jamais qu'un contenu existe.
+- Les messages entre crochets [événements] viennent du studio, pas de Fabien. Réponds exactement « … », sauf s'ils te demandent explicitement de prévenir Fabien : alors une phrase très courte.`;
 
 export interface DirectorCallbacks {
   /** A complete sentence, ready to be spoken. */
@@ -65,6 +70,7 @@ export class Director {
   private busy = false;
   private queued: { text: string; kind: "user" | "event" }[] = [];
   lastSpokeAt = 0;
+  private notes: string[] = [];
 
   constructor(private getKey: () => string | null, private getModel: () => string, private actions: DirectorActions, private cb: DirectorCallbacks) {}
 
@@ -81,6 +87,11 @@ export class Director {
 
   user(text: string) {
     this.enqueue({ text, kind: "user" });
+  }
+  /** Something the studio said or did by itself. No reply is generated; the model learns it with the next turn. */
+  note(text: string) {
+    this.notes.push(text);
+    if (this.notes.length > 12) this.notes.shift();
   }
   event(text: string) {
     // Events never interrupt a reply in progress and collapse while waiting.
@@ -126,6 +137,7 @@ export class Director {
     if (!key) return this.stubTurn(text);
     const client = new Anthropic({ apiKey: key, maxRetries: 1, timeout: 20_000 });
     const model = this.getModel();
+    if (this.notes.length) this.pushUser(`[événements] ${this.notes.splice(0).join(" ")}`);
     this.pushUser(text);
     this.abort = new AbortController();
     const signal = this.abort.signal;
@@ -146,7 +158,7 @@ export class Director {
         const stream = client.messages.stream(
           {
             model,
-            max_tokens: 400,
+            max_tokens: 300,
             // Latency first: no thinking, low effort. (Also keeps the history free of thinking blocks, so it can be trimmed.)
             thinking: { type: "disabled" },
             output_config: { effort: "low" },
@@ -197,8 +209,8 @@ export class Director {
     const a = (input ?? {}) as Record<string, unknown>;
     try {
       switch (name) {
-        case "start_episode":
-          return this.actions.startEpisode({ company: String(a.company ?? ""), destination: String(a.destination ?? ""), topic: String(a.topic ?? ""), etaMin: Number(a.eta_min) || undefined });
+        case "set_episode":
+          return this.actions.setEpisode({ company: typeof a.company === "string" ? a.company : undefined, destination: typeof a.destination === "string" ? a.destination : undefined, topic: typeof a.topic === "string" ? a.topic : undefined, etaMin: Number(a.eta_min) > 0 ? Number(a.eta_min) : undefined });
         case "end_episode":
           return this.actions.endEpisode();
         case "dispatch_task":
@@ -222,26 +234,21 @@ export class Director {
 
   /** No Anthropic key: a scripted co-host so the voice loop, layout and recording can still be rehearsed. */
   private stubTurn(text: string) {
-    if (text.startsWith("[événements]")) {
-      if (/terminé|budget|premier/i.test(text) && Date.now() - this.lastSpokeAt > 8000) this.speak(text.replace("[événements]", "").trim().split(/(?<=[.!?])\s/)[0]);
-      return;
-    }
+    if (text.startsWith("[événements]")) return;
     const t = text.toLowerCase();
     if (/termin|arriv|stop|fini/.test(t) && /épisode|on est|je suis|c'est/.test(t)) {
       this.actions.endEpisode();
-      this.speak("On est arrivés, je coupe. Belle route !");
-    } else if (/quiz|évaluation|question/.test(t)) {
-      this.speak(this.actions.dispatch(`Évaluation demandée à la voix : ${text}`).includes("Erreur") ? "Je n'ai pas pu lancer ça." : "C'est parti, un Claude s'occupe du quiz en parallèle.");
+      this.speak("On est arrivés, je coupe.");
     } else if (/plein écran|zoom|montre/.test(t)) {
       this.actions.focusTile(1);
-      this.speak("Je mets l'aperçu en grand.");
+      this.speak("En grand.");
     } else if (/où en|statut|avance/.test(t)) {
       this.speak(this.actions.status().split("\n")[0]);
-    } else if (/cours|formation|parcours|scène|3d|ajoute|change|rends|modifie/.test(t)) {
-      this.actions.dispatch(text, /rends|change|modifie/.test(t) ? 1 : undefined);
-      this.speak("Bien reçu, je lance ça tout de suite.");
+    } else if (/cours|formation|parcours|scène|3d|quiz|évaluation|question|ajoute|change|rends|modifie/.test(t)) {
+      const r = this.actions.dispatch(text, /rends|change|modifie/.test(t) ? 1 : undefined);
+      this.speak(r.startsWith("Erreur") ? "Impossible pour l'instant." : "C'est parti.");
     } else {
-      this.speak("Mode démo : ajoute une clé Claude dans les réglages pour une vraie conversation.");
+      this.speak("Mode démo, sans clé Claude.");
     }
   }
 }

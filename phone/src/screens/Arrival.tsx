@@ -50,7 +50,7 @@ export function Arrival() {
   const share = async () => {
     const files = (clips ?? []).filter((c) => c.variant === "tall").map((c) => c.file);
     try {
-      if (files.length && navigator.canShare?.({ files })) await navigator.share({ files, title: `Ride Studio · ${ep.setup.company}`, text: `${ep.setup.company} a sa formation « ${ep.setup.topic} », construite sur Mexty pendant le trajet.` });
+      if (files.length && navigator.canShare?.({ files })) await navigator.share({ files, title: `Ride Studio${ep.setup.company ? ` · ${ep.setup.company}` : ""}`, text: "Formation construite sur Mexty pendant le trajet." });
       else (clips ?? []).forEach(save);
     } catch {
       /* share sheet dismissed */
@@ -73,7 +73,7 @@ export function Arrival() {
         <h1 className="m-0 font-display text-[46px] font-extrabold leading-[0.95] tracking-tighter">{ep.delivered.length ? "Formation livrée." : "Épisode terminé."}</h1>
         <p className="m-0 text-sm leading-snug">
           {ep.delivered.length
-            ? `${ep.setup.company} a sa formation${ep.setup.topic ? ` « ${ep.setup.topic} »` : ""}${first?.url ? ", sur Mexty." : " (contenu de démonstration)."}`
+            ? `${ep.setup.company || "L'entreprise"} a sa formation${ep.setup.topic ? ` « ${ep.setup.topic} »` : ""}${first?.url ? ", sur Mexty." : " (contenu de démonstration)."}`
             : "Aucun contenu n'a été créé pendant cet épisode."}
         </p>
         <span className="mt-auto font-display text-lg font-bold">Demain, nouvelle entreprise.</span>

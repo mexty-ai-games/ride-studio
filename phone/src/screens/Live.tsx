@@ -87,7 +87,7 @@ export function Live() {
           </div>
           <div className="flex min-w-0 flex-col gap-1">
             <span className="eyebrow">Top chrono</span>
-            <span className="font-display text-lg font-bold leading-tight">{ep.setup.company}</span>
+            <span className="font-display text-lg font-bold leading-tight">{ep.setup.company || "Ride Studio"}</span>
             <span className="truncate text-xs text-muted">{[ep.setup.destination, `${ep.setup.etaMin} min`].filter(Boolean).join(" · ")}</span>
           </div>
         </div>
