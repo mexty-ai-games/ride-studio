@@ -1,5 +1,6 @@
 import type { EpisodeSetup } from "../../shared/protocol";
 import { audio } from "./audio";
+import { birds } from "./birds";
 import { Compositor } from "./compositor";
 import { link } from "./link";
 import { Recording, recId, pruneRecordings } from "./recorder";
@@ -51,6 +52,7 @@ class Studio {
     await this.prepare();
     this.recordWide = setup.wide;
     this.comp.clearFrames();
+    birds.reset();
     useApp.getState().set({ claudeLine: "", userLine: "", partial: "", changes: [] });
     link.send({ t: "episode.start", setup });
     link.send({ t: "stt.start" });

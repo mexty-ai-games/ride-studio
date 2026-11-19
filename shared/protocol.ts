@@ -108,6 +108,8 @@ export type PhoneToServer =
   | { t: "stt.start"; bakeoff?: boolean; vendors?: string[] }
   | { t: "stt.stop" }
   | { t: "bargein" }
+  /** Emergency stop: every running agent and the voice, at once. The episode and the recording go on. */
+  | { t: "stop" }
   | { t: "text"; text: string }
   | { t: "ping"; ts: number };
 
@@ -120,6 +122,8 @@ export type ServerToPhone =
   | { t: "tts.cancel" }
   | { t: "change"; event: ChangeEvent; slot: number | null }
   | { t: "beat"; label: string; ts: number }
+  /** A piece of content started or finished: the phone plays its bird phrase. */
+  | { t: "cue"; kind: "started" | "finished"; entity: Entity; slot: number | null }
   | { t: "bakeoff.saved"; id: string; url: string; seconds: number }
   | { t: "pong"; ts: number }
   | { t: "error"; message: string };
@@ -168,6 +172,7 @@ export type DeviceToServer =
   | { t: "status"; active: string[]; concurrency: number }
   | { t: "task.event"; taskId: string; event: TaskEvent };
 
+/** `taskId: "*"` stops every task on the device. */
 export type ServerToDevice = TaskRun | { t: "task.stop"; taskId: string } | { t: "welcome"; deviceId: string; name: string };
 
 /** MCP tool name → bare tool ("mcp__MEXTY__add_slide" → "add_slide"). */

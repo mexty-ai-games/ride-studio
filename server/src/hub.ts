@@ -21,6 +21,7 @@ interface Worker extends WorkerState {
   pendingCalls: Map<string, { name: string; input: unknown }>;
   queue: string[]; // follow-up briefs received while a run is in progress
   costBase: number; // cost of finished runs; the current run reports a cumulative figure
+  lastEventAt?: number; // any sign of life from the runner (reads, thinking, writes)
 }
 interface MockDoc {
   title: string;
@@ -39,6 +40,8 @@ interface Target {
 
 const SKILL = config.skillPath ? readFileSync(config.skillPath, "utf8").replace(/^---[\s\S]*?---\s*/, "") : "";
 const MAX_TILES = 4;
+/** No visible change and no sign of life from a running task for this long counts as blocked. */
+const STALL_MS = 120_000;
 
 export class Hub {
   readonly devices = new DeviceHub();
@@ -85,6 +88,7 @@ export class Hub {
         return "Noté.";
       },
       endEpisode: () => (this.endEpisode(), "Épisode terminé."),
+      stopAll: () => (setTimeout(() => this.stopAll(), 0), "Tout est arrêté. Ne dis rien : le studio l'annonce."),
       dispatch: (brief, target) => this.dispatch(brief, target),
       status: () => this.statusText(),
       setLayout: (mode) => ((this.layout = mode), (this.focus = null), this.pushState(), `Disposition : ${mode}.`),
@@ -113,6 +117,7 @@ export class Hub {
   constructor() {
     this.devices.onChange = () => this.pushState();
     setInterval(() => void this.checkMexty(), 5 * 60_000).unref();
+    setInterval(() => this.checkStalls(), 10_000).unref();
     void this.checkMexty();
   }
 
@@ -172,7 +177,7 @@ export class Hub {
   state(): StudioState {
     return {
       episode: this.episode,
-      workers: this.workers.map(({ running: _r, pendingCalls: _p, queue: _q, resume: _s, costBase: _c, deviceId: _d, ...w }) => w),
+      workers: this.workers.map(({ running: _r, pendingCalls: _p, queue: _q, resume: _s, costBase: _c, deviceId: _d, lastEventAt: _l, ...w }) => w),
       tiles: this.tiles(),
       layout: this.layout,
       focus: this.focus,
@@ -230,6 +235,8 @@ export class Hub {
     const ep = this.episode;
     if (!ep || ep.status !== "live") return;
     for (const w of this.workers) this.stopWorker(w, "stopped");
+    this.devices.stopAll();
+    this.director.halt();
     ep.status = "ended";
     ep.endedAt = Date.now();
     const front = store.settings.mexty.frontUrl;
@@ -351,6 +358,8 @@ export class Hub {
     const spec: TaskSpec = { taskId: `${w.id}:${Date.now()}`, brief, resume: w.resume, model: s.claude.workerModel, allowedTools: s.claude.allowedTools, systemAppend: SKILL + (s.claude.workspace ? `\n\nEspace de travail Mexty par défaut : ${s.claude.workspace}.` : ""), maxTurns: s.claude.maxTurns };
     const emit = (e: TaskEvent) => this.onTaskEvent(w, e);
     w.status = "running";
+    w.startedAt = Date.now();
+    w.lastEventAt = Date.now();
     w.brief = brief;
     w.error = undefined;
     if (deviceId && (!sticky || (sticky === "device" && (!w.deviceId || w.deviceId === deviceId)))) {
@@ -380,15 +389,31 @@ export class Hub {
     this.pushState();
   }
 
+  /** Emergency stop (button or voice): every agent, the orchestrator's pending work and the voice. The episode goes on. */
+  stopAll() {
+    this.director.halt();
+    this.ttsQueue = [];
+    this.ttsAbort?.abort();
+    this.broadcast({ t: "tts.cancel" });
+    for (const w of this.workers) this.stopWorker(w, "stopped");
+    // Also reach tasks a restart of this server may have orphaned on the machines.
+    this.devices.stopAll();
+    this.stalled.clear();
+    this.pushState();
+    this.announce("Tout est arrêté.");
+  }
+
   private stopWorker(w: Worker, status: WorkerState["status"]) {
     w.queue = [];
     if (w.status === "running" || w.status === "queued") {
-      w.running?.stop();
+      // Status first: the runner's final event must not be read as a failure of a task we stopped on purpose.
       w.status = status;
+      w.running?.stop();
     }
   }
 
   private onTaskEvent(w: Worker, e: TaskEvent) {
+    w.lastEventAt = Date.now();
     switch (e.kind) {
       case "init":
         w.resume = e.sessionId;
@@ -455,7 +480,7 @@ export class Hub {
     if (!t) {
       t = { key, entity: ev.entity, entityId: ev.entityId, workerId: w.id, title: title ?? "", doc: { title: title ?? "", items: [] }, slot: null, propsId: ev.path.propsId };
       this.targets.set(key, t);
-      void this.openTile(t);
+      void this.openTile(t).then(() => this.broadcast({ t: "cue", kind: "started", entity: t!.entity, slot: t!.slot }));
     }
     if (title) t.title = t.doc.title = title;
 
@@ -512,11 +537,33 @@ export class Hub {
   /** The only progress report the rider gets: "Cours 1 terminé." */
   private announceDone(w: Worker, ok: boolean) {
     const mine = [...this.targets.values()].filter((t) => t.workerId === w.id);
-    if (!ok) return this.announce(mine.length ? `${this.nameOf(mine.at(-1)!)} : erreur.` : "Une demande a échoué.");
+    if (!ok) return this.announce(mine.length ? `${this.nameOf(mine.at(-1)!)} bloqué${this.feminine(mine.at(-1)!) ? "e" : ""}.` : "Demande bloquée.");
     // Containers a course task only touched in passing (its own blocks) are not announced one by one.
     const main = mine.filter((t) => t.entity !== "block" || mine.every((x) => x.entity === "block"));
     if (!main.length) return this.announce("C'est fait.");
-    for (const t of main) this.announce(`${this.nameOf(t)} terminé${t.entity === "evaluation" || t.entity === "block" || t.entity === "scene" ? "e" : ""}.`);
+    for (const t of main) {
+      this.broadcast({ t: "cue", kind: "finished", entity: t.entity, slot: t.slot });
+      this.announce(`${this.nameOf(t)} terminé${this.feminine(t) ? "e" : ""}.`);
+    }
+  }
+  private feminine = (t: Target) => t.entity === "evaluation" || t.entity === "block" || t.entity === "scene";
+  private stalled = new Set<string>();
+  /** A content that is being built but has not changed for a while: say so once, so the rider can relaunch it. */
+  private checkStalls() {
+    if (this.episode?.status !== "live") return;
+    const now = Date.now();
+    for (const w of this.workers) {
+      if (w.status !== "running") continue;
+      const mine = [...this.targets.values()].filter((t) => t.workerId === w.id);
+      const last = Math.max(w.startedAt, w.lastEventAt ?? 0, ...mine.map((t) => this.lastChange.get(t.key)?.ts ?? 0));
+      const key = `${w.id}:${w.brief}`;
+      if (now - last < STALL_MS) this.stalled.delete(key);
+      else if (!this.stalled.has(key)) {
+        this.stalled.add(key);
+        const t = mine.at(-1);
+        this.announce(t ? `${this.nameOf(t)} bloqué${this.feminine(t) ? "e" : ""}.` : "Demande bloquée.");
+      }
+    }
   }
 
   // ---------- tiles / previews ----------

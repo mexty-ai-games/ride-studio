@@ -295,6 +295,8 @@ function phoneSocket(ws: WebSocket) {
         return hub.endEpisode();
       case "bargein":
         return hub.stopSpeaking();
+      case "stop":
+        return hub.stopAll();
       case "text":
         if (typeof m.text === "string" && m.text.trim()) hub.userTurn(m.text.trim().slice(0, 600));
         return;

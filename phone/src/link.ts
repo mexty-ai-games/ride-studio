@@ -1,4 +1,4 @@
-import { BIN_FRAME, BIN_MIC, BIN_TTS, type PhoneToServer, type ServerToPhone } from "../../shared/protocol";
+import { BIN_FRAME, BIN_MIC, BIN_TTS, type ChangeEvent, type Entity, type PhoneToServer, type ServerToPhone } from "../../shared/protocol";
 import { useApp } from "./store";
 
 type Handlers = {
@@ -6,6 +6,8 @@ type Handlers = {
   ttsCancel(): void;
   say(id: number, text: string, audio: boolean): void;
   frame(slot: number, jpeg: Blob): void;
+  cue(kind: "started" | "finished", entity: Entity): void;
+  change(event: ChangeEvent, slot: number | null): void;
 };
 
 /** The single WebSocket to the backend: JSON control messages plus binary mic, voice and preview frames. */
@@ -97,7 +99,11 @@ class Link {
         else if (m.kind === "error") app.error(m.text ?? "Erreur de transcription");
         break;
       }
+      case "cue":
+        this.handlers.cue?.(m.kind, m.entity);
+        break;
       case "change":
+        this.handlers.change?.(m.event, m.slot);
         app.set({ changes: [...app.changes.filter((c) => Date.now() - c.at < 4000), { event: m.event, slot: m.slot, at: Date.now() }] });
         break;
       case "bakeoff.saved":

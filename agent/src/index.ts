@@ -164,7 +164,10 @@ async function daemon() {
         });
         active.set(task.taskId, ctl);
       } else if (m.t === "task.stop") {
-        active.get(m.taskId)?.abort();
+        if (m.taskId === "*") {
+          console.log(`[ride-agent] stop all (${active.size} running)`);
+          for (const ctl of active.values()) ctl.abort();
+        } else active.get(m.taskId)?.abort();
       }
     });
     ws.on("unexpected-response", (_q, res) => {

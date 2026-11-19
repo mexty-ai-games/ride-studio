@@ -16,6 +16,7 @@ export function tokenCost(model: string, u: { input_tokens?: number | null; outp
 export interface DirectorActions {
   setEpisode(setup: Partial<EpisodeSetup>): string;
   endEpisode(): string;
+  stopAll(): string;
   dispatch(brief: string, target?: number): string;
   status(): string;
   setLayout(mode: LayoutMode): string;
@@ -29,6 +30,7 @@ const TOOLS: Anthropic.Tool[] = [
     description: "Enregistre ce que Fabien vient de dire sur l'épisode : entreprise, destination, durée du trajet, formation à livrer. À appeler dès qu'il donne l'une de ces informations (le chrono et le titre à l'image en dépendent).",
     input_schema: { type: "object", properties: { company: { type: "string" }, destination: { type: "string" }, eta_min: { type: "number" }, topic: { type: "string" } }, additionalProperties: false },
   },
+  { name: "stop_all", description: "Arrêt d'urgence : stoppe immédiatement tout ce qui est en construction. À appeler dès que Fabien dit « stop », « arrête tout », « on arrête ». L'épisode et l'enregistrement continuent.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "end_episode", description: "Termine l'épisode et l'enregistrement. À l'arrivée, ou si Fabien le demande.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   {
     name: "dispatch_task",
@@ -82,6 +84,11 @@ export class Director {
 
   /** Barge-in: stop generating. What was already said stays in the history. */
   interrupt() {
+    this.abort?.abort();
+  }
+  /** Emergency stop: drop everything waiting to be said or done, and stop the reply in progress. */
+  halt() {
+    this.queued = [];
     this.abort?.abort();
   }
 
@@ -211,6 +218,8 @@ export class Director {
       switch (name) {
         case "set_episode":
           return this.actions.setEpisode({ company: typeof a.company === "string" ? a.company : undefined, destination: typeof a.destination === "string" ? a.destination : undefined, topic: typeof a.topic === "string" ? a.topic : undefined, etaMin: Number(a.eta_min) > 0 ? Number(a.eta_min) : undefined });
+        case "stop_all":
+          return this.actions.stopAll();
         case "end_episode":
           return this.actions.endEpisode();
         case "dispatch_task":
@@ -236,7 +245,9 @@ export class Director {
   private stubTurn(text: string) {
     if (text.startsWith("[événements]")) return;
     const t = text.toLowerCase();
-    if (/termin|arriv|stop|fini/.test(t) && /épisode|on est|je suis|c'est/.test(t)) {
+    if (/^(stop|arrête)\b|arrête tout/.test(t)) {
+      this.actions.stopAll();
+    } else if (/termin|arriv|fini/.test(t) && /épisode|on est|je suis|c'est/.test(t)) {
       this.actions.endEpisode();
       this.speak("On est arrivés, je coupe.");
     } else if (/plein écran|zoom|montre/.test(t)) {

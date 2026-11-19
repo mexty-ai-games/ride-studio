@@ -108,6 +108,13 @@ class AudioEngine {
     } else this.loud = 0;
   }
 
+  /** Route notification sounds to the headset and into the recording, like Claude's voice. */
+  connectCue(node: AudioNode) {
+    if (!this.ctx || !this.mixDest) return;
+    node.connect(this.ctx.destination);
+    node.connect(this.mixDest);
+  }
+
   playTts(pcm: Int16Array) {
     const ctx = this.ctx;
     if (!ctx || !this.ttsGain || pcm.length === 0) return;

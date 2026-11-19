@@ -129,6 +129,7 @@ export function Live() {
 
         {/* Monitor-only controls, for when the bike is stopped. Nothing here is needed while riding. */}
         <div className="flex gap-2">
+          <button onClick={() => link.send({ t: "stop" })} aria-label="Arrêter tous les agents" className="h-11 grow rounded-2xl border-2 border-[#FF3B3B] bg-rec-bg text-sm font-extrabold text-rec-text">Stop</button>
           <button onClick={() => setKeyboard((k) => !k)} className="h-11 grow rounded-2xl border border-line bg-surface text-sm font-semibold text-text">{keyboard ? "Masquer" : "Clavier"}</button>
           {confirmEnd ? (
             <button onClick={() => studio.end()} className="h-11 grow rounded-2xl border-0 bg-[#FF3B3B] text-sm font-bold text-white">Confirmer l'arrivée</button>

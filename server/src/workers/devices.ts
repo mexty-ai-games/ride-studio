@@ -79,6 +79,11 @@ export class DeviceHub {
     return { stop: () => this.send(link, { t: "task.stop", taskId: spec.taskId }) };
   }
 
+  /** Tell every connected machine to abort everything it is running, including tasks this server lost track of. */
+  stopAll() {
+    for (const link of this.links.values()) this.send(link, { t: "task.stop", taskId: "*" });
+  }
+
   disconnect(id: string) {
     this.links.get(id)?.ws.close(4001, "unpaired");
   }
