@@ -70,7 +70,8 @@ export class PreviewRenderer {
     await context.addInitScript(() => {
       const get = Storage.prototype.getItem;
       Storage.prototype.getItem = function (key: string) {
-        return key === "edv-editor-tour-v1" || key.startsWith("edv-editor-firstrun-closed:") ? "1" : get.call(this, key);
+        // mexty_onboarding_v1: the welcome tour, which otherwise redirects every LMS page to /lms/chat.
+        return key === "mexty_onboarding_v1" || key === "edv-editor-tour-v1" || key.startsWith("edv-editor-firstrun-closed:") ? "1" : get.call(this, key);
       };
     });
     const page = await context.newPage();

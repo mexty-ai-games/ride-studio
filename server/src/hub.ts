@@ -243,6 +243,8 @@ export class Hub {
     if (ep.phase === "arrived") return "Déjà arrivés.";
     ep.phase = "arrived";
     ep.arrivedAt = Date.now();
+    // Start the showing part from the overview: nothing opens on the phone until it is asked for.
+    if (this.show.key) void this.showContent(null);
     this.announce("Arrivés. On continue de tourner.");
     this.pushState();
     return "OK.";
@@ -286,7 +288,8 @@ export class Hub {
     if (t.slot == null) await this.openTile(t);
     this.show = { key, qr: this.show.key === key && this.show.qr };
     this.focus = t.slot;
-    if (t.slot != null) void this.previews.resize(t.slot, PORTRAIT);
+    // On the road it is just the full-size screen; once arrived it opens on the phone and is filmed in portrait.
+    if (t.slot != null && this.episode?.phase === "arrived") void this.previews.resize(t.slot, PORTRAIT);
     this.pushState();
     return `${this.nameOf(t)} à l'écran.`;
   }
@@ -309,7 +312,14 @@ export class Hub {
     const list = this.contents();
     const q = norm(name);
     if (!q) return list.at(-1) ?? null;
-    return list.find((c) => norm(c.name) === q) ?? list.find((c) => norm(c.name).includes(q) || q.includes(norm(c.name))) ?? list.find((c) => c.title && norm(c.title).includes(q)) ?? (list.length === 1 ? list[0] : null);
+    const byName = list.find((c) => norm(c.name) === q) ?? list.find((c) => norm(c.name).includes(q) || q.includes(norm(c.name))) ?? list.find((c) => c.title && (norm(c.title).includes(q) || q.includes(norm(c.title))));
+    if (byName) return byName;
+    // A kind of content ("le parcours", "le premier cours", "le quiz"): the first of that kind.
+    const kinds: [RegExp, ContentLink["entity"]][] = [[/parcours|programme|learning ?path|chemin/, "program"], [/cours|course|lecon/, "course"], [/quiz|evaluation|questionnaire|test/, "evaluation"], [/scene|3d|jeu|game|systeme solaire/, "scene"], [/activite|bloc|block/, "block"]];
+    const kind = kinds.find(([re]) => re.test(q))?.[1];
+    const ofKind = kind ? list.filter((c) => c.entity === kind) : [];
+    const ordinal = /deuxieme|second|2/.test(q) ? 1 : /troisieme|3/.test(q) ? 2 : /dernier/.test(q) ? ofKind.length - 1 : 0;
+    return ofKind[ordinal] ?? ofKind[0] ?? (list.length === 1 ? list[0] : null);
   }
   /** What is on each screen, in the words the rider uses ("le deuxième écran"). */
   private screensText(): string {

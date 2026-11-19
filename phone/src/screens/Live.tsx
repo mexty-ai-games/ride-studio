@@ -160,7 +160,7 @@ export function Live() {
           )}
         </div>
       </div>
-      {s.show.key && <ShowOverlay s={s} />}
+      {s.show.key && arrived && <ShowOverlay s={s} />}
     </div>
   );
 }

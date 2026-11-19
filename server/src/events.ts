@@ -150,8 +150,9 @@ export function previewUrl(front: string, blockId: string, propsId?: string, edv
 export function openUrl(front: string, entity: Entity, id: string, extra: { propsId?: string; edverse?: boolean; game?: { blockId: string; propsId?: string } } = {}): string {
   switch (entity) {
     case "course": return `${front}/lms/courses/${id}/slideshow?embedded=1`;
-    case "program": return `${front}/lms/programs?program=${id}`;
-    case "evaluation": return `${front}/lms/evaluations/${id}/play`;
+    // embedded=1: the page alone, without the workspace top bar and sidebar.
+    case "program": return `${front}/lms/programs?program=${id}&embedded=1`;
+    case "evaluation": return `${front}/lms/evaluations/${id}/play?embedded=1`;
     case "block": return previewUrl(front, id, extra.propsId, extra.edverse);
     // A scene is played through its game (the block that holds it); without one, the editor is all there is.
     case "scene": return extra.game ? previewUrl(front, extra.game.blockId, extra.game.propsId, true) : `${front}/edverse/editor/${id}`;

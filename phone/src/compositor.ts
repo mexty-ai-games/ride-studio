@@ -167,7 +167,8 @@ export class Compositor {
 
   private draw(ctx: CanvasRenderingContext2D, base: Layout, app: ReturnType<typeof useApp.getState>) {
     const s = app.studio;
-    const shown = s?.show.key ? s.contents.find((c) => c.key === s.show.key) : undefined;
+    // On the road, showing a content is just the full-size screen; the portrait layout is for once arrived.
+    const shown = s?.show.key && s.episode?.phase === "arrived" ? s.contents.find((c) => c.key === s.show.key) : undefined;
     const L = shown && shown.slot != null ? (base.tall ? TALL_SHOW : WIDE_SHOW) : base;
     const ep = s?.episode;
     const now = Date.now();
