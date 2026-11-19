@@ -42,6 +42,19 @@ export interface TileState {
   lastChangeTs: number;
   lastChange?: ChangeEvent;
   mode: "mexty" | "mock";
+  /** Where the finished content opens for a person to try it (learner view, block preview.html with its props). */
+  url?: string;
+}
+
+/** A content built during the episode, as the rider names it ("Cours 1", "Programme d'étude"). */
+export interface ContentLink {
+  key: string;
+  name: string;
+  entity: Entity;
+  title: string;
+  url: string;
+  slot: number | null;
+  done: boolean;
 }
 
 export interface WorkerState {
@@ -75,6 +88,9 @@ export interface EpisodeState {
   startedAt: number;
   endedAt?: number;
   status: "live" | "ended";
+  /** "arrived": the ride is over (the chrono stops) but the episode and the recording go on. */
+  phase: "ride" | "arrived";
+  arrivedAt?: number;
   beats: { label: string; ts: number }[];
   delivered: { entity: Entity; entityId: string; title: string; url?: string }[];
   stats: { slides: number; questions: number; nodes: number; objects: number; changes: number };
@@ -99,12 +115,23 @@ export interface StudioState {
   cost: CostState;
   readiness: Readiness;
   speaking: boolean;
+  /** The phone records while "on"; "paused" closes the current file, "on" again starts the next one. */
+  rec: "on" | "paused";
+  camera: "user" | "environment";
+  /** A content shown to someone: full picture in the recording and open on the phone. */
+  show: { key: string | null; qr: boolean };
+  contents: ContentLink[];
 }
 
 // ---- phone <-> server (JSON text frames) ----
 export type PhoneToServer =
   | { t: "episode.start"; setup: EpisodeSetup }
   | { t: "episode.end" }
+  | { t: "arrive" }
+  | { t: "rec"; action: "pause" | "resume" }
+  | { t: "camera"; facing?: "user" | "environment" }
+  | { t: "show"; key: string | null }
+  | { t: "qr"; on: boolean }
   | { t: "stt.start"; bakeoff?: boolean; vendors?: string[] }
   | { t: "stt.stop" }
   | { t: "bargein" }

@@ -33,6 +33,9 @@ export function pickMime(): string {
   return options.find((m) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)) ?? "";
 }
 
+/** Recordings still being written: the uploader leaves them alone. */
+export const openRecordings = new Set<string>();
+
 export class Recording {
   private rec: MediaRecorder;
   private seq = 0;
@@ -48,6 +51,7 @@ export class Recording {
     };
   }
   start() {
+    openRecordings.add(this.id);
     this.rec.start(3000);
   }
   async stop() {
@@ -59,6 +63,7 @@ export class Recording {
     }
     await Promise.all(this.pending);
     this.rec.stream.getTracks().forEach((t) => t.stop());
+    openRecordings.delete(this.id);
   }
 }
 

@@ -15,9 +15,14 @@ interface Layout {
   W: number; H: number; pad: number;
   head: Rect; ring: { cx: number; cy: number; r: number }; previews: Rect; cam: Rect; voice: Rect; foot: Rect;
   title: number; body: number;
+  tall: boolean;
 }
-const TALL: Layout = { W: 1080, H: 1920, pad: 40, head: { x: 40, y: 56, w: 780, h: 170 }, ring: { cx: 950, cy: 142, r: 78 }, previews: { x: 40, y: 262, w: 1000, h: 860 }, cam: { x: 40, y: 1158, w: 440, h: 560 }, voice: { x: 508, y: 1158, w: 532, h: 560 }, foot: { x: 40, y: 1750, w: 1000, h: 120 }, title: 62, body: 34 };
-const WIDE: Layout = { W: 1280, H: 720, pad: 24, head: { x: 24, y: 20, w: 620, h: 84 }, ring: { cx: 1196, cy: 78, r: 54 }, previews: { x: 24, y: 116, w: 860, h: 540 }, cam: { x: 908, y: 150, w: 348, h: 290 }, voice: { x: 908, y: 454, w: 348, h: 202 }, foot: { x: 24, y: 668, w: 1232, h: 36 }, title: 34, body: 20 };
+const TALL: Layout = { W: 1080, H: 1920, pad: 40, head: { x: 40, y: 56, w: 780, h: 170 }, ring: { cx: 950, cy: 142, r: 78 }, previews: { x: 40, y: 262, w: 1000, h: 860 }, cam: { x: 40, y: 1158, w: 440, h: 560 }, voice: { x: 508, y: 1158, w: 532, h: 560 }, foot: { x: 40, y: 1750, w: 1000, h: 120 }, title: 62, body: 34, tall: true };
+const WIDE: Layout = { W: 1280, H: 720, pad: 24, head: { x: 24, y: 20, w: 620, h: 84 }, ring: { cx: 1196, cy: 78, r: 54 }, previews: { x: 24, y: 116, w: 860, h: 540 }, cam: { x: 908, y: 150, w: 348, h: 290 }, voice: { x: 908, y: 454, w: 348, h: 202 }, foot: { x: 24, y: 668, w: 1232, h: 36 }, title: 34, body: 20, tall: false };
+
+/** Showing a content to someone: the content (portrait, as on a phone) takes most of the picture. */
+const TALL_SHOW: Layout = { ...TALL, previews: { x: 40, y: 250, w: 1000, h: 1180 }, cam: { x: 40, y: 1460, w: 330, h: 260 }, voice: { x: 396, y: 1460, w: 644, h: 260 } };
+const WIDE_SHOW: Layout = { ...WIDE, head: { x: 24, y: 20, w: 280, h: 84 }, previews: { x: 320, y: 16, w: 560, h: 690 }, foot: { x: 24, y: 668, w: 280, h: 36 } };
 
 const TILE_ASPECT = 960 / 600;
 
@@ -59,12 +64,13 @@ function fit(ctx: CanvasRenderingContext2D, text: string, maxW: number): string 
 }
 
 /** Tile rectangles for the current layout: one fills, two split, three or four put the freshest tile on top. */
-export function tileRects(area: Rect, tiles: TileState[], layout: StudioState["layout"], focus: number | null): Map<number, Rect> {
+export function tileRects(area: Rect, tiles: TileState[], layout: StudioState["layout"], focus: number | null, aspectOf: (slot: number) => number = () => TILE_ASPECT): Map<number, Rect> {
   const out = new Map<number, Rect>();
   const gap = Math.round(area.w * 0.02);
-  const contain = (box: Rect): Rect => {
-    const w = Math.min(box.w, box.h * TILE_ASPECT);
-    const h = w / TILE_ASPECT;
+  const contain = (box: Rect, slot = -1): Rect => {
+    const a = slot >= 0 ? aspectOf(slot) : TILE_ASPECT;
+    const w = Math.min(box.w, box.h * a);
+    const h = w / a;
     return { x: box.x + (box.w - w) / 2, y: box.y + (box.h - h) / 2, w, h };
   };
   const focused = focus != null ? tiles.find((t) => t.slot === focus) : undefined;
@@ -73,7 +79,7 @@ export function tileRects(area: Rect, tiles: TileState[], layout: StudioState["l
   else if (layout === "single" && tiles.length) list = [[...tiles].sort((a, b) => b.lastChangeTs - a.lastChangeTs)[0]];
   if (list.length === 0) return out;
   if (list.length === 1) {
-    out.set(list[0].slot, contain(area));
+    out.set(list[0].slot, contain(area, list[0].slot));
     return out;
   }
   const tall = area.h > area.w * 0.75;
@@ -115,6 +121,9 @@ export class Compositor {
   private raf = 0;
   private last = 0;
   cam: HTMLVideoElement | null = null;
+  /** Selfie camera is mirrored; the rear camera is not. */
+  mirror = true;
+  private qr = new Map<string, HTMLImageElement>();
   targets: { canvas: HTMLCanvasElement; layout: Layout }[] = [];
 
   constructor() {
@@ -156,11 +165,13 @@ export class Compositor {
     this.anim.clear();
   }
 
-  private draw(ctx: CanvasRenderingContext2D, L: Layout, app: ReturnType<typeof useApp.getState>) {
+  private draw(ctx: CanvasRenderingContext2D, base: Layout, app: ReturnType<typeof useApp.getState>) {
     const s = app.studio;
+    const shown = s?.show.key ? s.contents.find((c) => c.key === s.show.key) : undefined;
+    const L = shown && shown.slot != null ? (base.tall ? TALL_SHOW : WIDE_SHOW) : base;
     const ep = s?.episode;
     const now = Date.now();
-    const u = L === TALL ? 1 : 0.62; // scale unit for radii, strokes and paddings
+    const u = L.tall ? 1 : 0.62; // scale unit for radii, strokes and paddings
 
     // Backdrop
     ctx.fillStyle = C.bg;
@@ -187,11 +198,12 @@ export class Compositor {
     ctx.fillText(fit(ctx, company, L.head.w), L.head.x, L.head.y + L.body * 0.9 + (L.title * (1 - shrink)) / 2);
     ctx.fillStyle = C.muted;
     ctx.font = `500 ${Math.round(L.body * 0.8)}px ${SANS}`;
-    if (ep?.setup.topic && L === TALL) ctx.fillText(fit(ctx, `Formation : ${ep.setup.topic}`, L.head.w), L.head.x, L.head.y + L.body * 0.9 + L.title * 1.18);
+    if (ep?.setup.topic && L.tall) ctx.fillText(fit(ctx, `Formation : ${ep.setup.topic}`, L.head.w), L.head.x, L.head.y + L.body * 0.9 + L.title * 1.18);
 
     // Countdown ring
     const total = (ep?.setup.etaMin ?? 25) * 60;
-    const elapsed = ep ? ((ep.endedAt ?? now) - ep.startedAt) / 1000 : 0;
+    const arrived = ep?.phase === "arrived";
+    const elapsed = ep ? ((ep.arrivedAt ?? ep.endedAt ?? now) - ep.startedAt) / 1000 : 0;
     const left = Math.max(0, total - elapsed);
     const { cx, cy, r } = L.ring;
     ctx.lineWidth = r * 0.17;
@@ -202,23 +214,26 @@ export class Compositor {
     ctx.strokeStyle = grad(ctx, { x: cx - r, y: cy - r, w: r * 2, h: r * 2 });
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.001, left / total));
+    ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (arrived ? 1 : Math.max(0.001, left / total)));
     ctx.stroke();
     ctx.lineCap = "butt";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = C.text;
     ctx.font = `800 ${Math.round(r * 0.52)}px ${DISPLAY}`;
-    ctx.fillText(fmtClock(ep ? (left > 0 ? left : elapsed - total) : total), cx, cy - r * 0.06);
+    ctx.fillText(fmtClock(arrived ? elapsed : ep ? (left > 0 ? left : elapsed - total) : total), cx, cy - r * 0.06);
     ctx.fillStyle = C.muted;
     ctx.font = `600 ${Math.round(r * 0.19)}px ${SANS}`;
-    ctx.fillText(left > 0 || !ep ? "RESTANTES" : "DE RETARD", cx, cy + r * 0.38);
+    ctx.fillText(arrived ? "ARRIVÉS" : left > 0 || !ep ? "RESTANTES" : "DE RETARD", cx, cy + r * 0.38);
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
 
     // Preview tiles
     const tiles = s?.tiles ?? [];
-    const rects = tileRects(L.previews, tiles, s?.layout ?? "auto", s?.focus ?? null);
+    const rects = tileRects(L.previews, tiles, s?.layout ?? "auto", shown?.slot ?? s?.focus ?? null, (slot) => {
+      const b = this.frames.get(slot);
+      return b ? b.width / b.height : TILE_ASPECT;
+    });
     if (!tiles.length) {
       rr(ctx, L.previews, 28 * u);
       ctx.fillStyle = C.surface;
@@ -246,6 +261,8 @@ export class Compositor {
       this.tile(ctx, cur, t, u, now, app);
     }
 
+    if (shown && s?.show.qr && shown.url) this.drawQr(ctx, L, shown.url, rects.get(shown.slot ?? -1));
+
     // Facecam
     rr(ctx, L.cam, 30 * u);
     ctx.save();
@@ -257,7 +274,7 @@ export class Compositor {
       const scale = Math.max(L.cam.w / v.videoWidth, L.cam.h / v.videoHeight);
       const dw = v.videoWidth * scale, dh = v.videoHeight * scale;
       ctx.translate(L.cam.x + L.cam.w / 2, L.cam.y + L.cam.h / 2);
-      ctx.scale(-1, 1); // mirror, like a selfie
+      if (this.mirror) ctx.scale(-1, 1); // mirror, like a selfie
       ctx.drawImage(v, -dw / 2, -dh / 2, dw, dh);
     }
     ctx.restore();
@@ -273,7 +290,7 @@ export class Compositor {
     const vp = 24 * u;
     const speaking = audio.speaking || !!s?.speaking;
     const barW = 6 * u, barGap = 5 * u, barMax = 44 * u;
-    const nBars = L === TALL ? this.bars.length : this.wideBars;
+    const nBars = L.tall ? this.bars.length : this.wideBars;
     for (let i = 0; i < nBars; i++) {
       const h = Math.max(6 * u, this.bars[i] * barMax);
       ctx.fillStyle = speaking ? C.pinkSoft : C.accent;
@@ -295,7 +312,7 @@ export class Compositor {
     const mine = app.partial || app.userLine;
     const mineFs = Math.round(L.body * 0.82);
     ctx.font = `500 ${mineFs}px ${SANS}`;
-    const mineLines = mine ? wrap(ctx, `Fabien : ${mine}`, innerW, L === TALL ? 3 : 1) : [];
+    const mineLines = mine ? wrap(ctx, `Fabien : ${mine}`, innerW, L.tall ? 3 : 1) : [];
     const mineH = mineLines.length * mineFs * 1.25;
     ctx.fillStyle = "rgba(244,246,255,0.72)";
     mineLines.forEach((line, i) => ctx.fillText(line, L.voice.x + vp, bottom - mineH + i * mineFs * 1.25));
@@ -309,6 +326,38 @@ export class Compositor {
 
     // Footer: progress chips and the brand
     this.footer(ctx, L, s, u);
+  }
+
+  /** The QR code of the content shown, on a white card beside it (or over its corner when there is no room). */
+  private drawQr(ctx: CanvasRenderingContext2D, L: Layout, url: string, content?: Rect) {
+    let img = this.qr.get(url);
+    if (!img) {
+      img = new Image();
+      img.src = `/api/qr.svg?u=${encodeURIComponent(url)}`;
+      this.qr.set(url, img);
+    }
+    if (!img.complete || !img.naturalWidth) return;
+    const size = L.tall ? 300 : 170;
+    const pad = L.tall ? 18 : 10;
+    const fs = L.tall ? 26 : 15;
+    const area = L.previews;
+    const right = content ? area.x + area.w - (content.x + content.w) : 0;
+    const x = right >= size + pad * 2 ? area.x + area.w - size - pad * 2 : (content ? content.x + content.w : area.x + area.w) - size - pad * 3;
+    const y = (content ? content.y + content.h : area.y + area.h) - size - pad * 2 - fs * 1.6;
+    rr(ctx, { x, y, w: size + pad * 2, h: size + pad * 2 + fs * 1.6 }, 18);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = 24;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.drawImage(img, x + pad, y + pad, size, size);
+    ctx.fillStyle = C.navy;
+    ctx.font = `700 ${fs}px ${SANS}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Scannez pour tester", x + pad + size / 2, y + pad + size + fs * 0.9);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
   }
 
   private tile(ctx: CanvasRenderingContext2D, r: Rect, t: TileState, u: number, now: number, app: ReturnType<typeof useApp.getState>) {
@@ -395,7 +444,7 @@ export class Compositor {
     ctx.textBaseline = "middle";
     let x = f.x;
     const h = fs * 2.1;
-    const y = L === TALL ? f.y : f.y + (f.h - h) / 2;
+    const y = L.tall ? f.y : f.y + (f.h - h) / 2;
     const st = s?.episode?.stats;
     const chips: [string, boolean][] = [];
     for (const w of s?.workers ?? []) chips.push([`${w.status === "done" ? "✓ " : ""}Claude ${w.no}${w.changes ? ` · ${w.changes}` : ""}`, w.status === "running"]);
@@ -409,7 +458,7 @@ export class Compositor {
     ctx.font = `700 ${fs}px ${SANS}`;
     for (const [text, active] of chips) {
       const w = ctx.measureText(text).width + fs * 1.7;
-      if (x + w > f.x + f.w - (L === TALL ? 0 : bw + 30)) break;
+      if (x + w > f.x + f.w - (L.tall ? 0 : bw + 30)) break;
       const r = { x, y, w, h };
       rr(ctx, r, h / 2);
       ctx.fillStyle = active ? grad(ctx, r) : "#E8EEFF";
@@ -420,10 +469,10 @@ export class Compositor {
     }
     ctx.font = `800 ${Math.round(fs * 1.5)}px ${DISPLAY}`;
     ctx.textAlign = "right";
-    const by = L === TALL ? f.y + f.h - fs * 1.1 : f.y + f.h / 2 + 1;
+    const by = L.tall ? f.y + f.h - fs * 1.1 : f.y + f.h / 2 + 1;
     ctx.fillStyle = grad(ctx, { x: f.x + f.w - bw, y: by - fs, w: bw, h: fs * 2 });
     ctx.fillText(brand, f.x + f.w, by);
-    if (L === TALL) {
+    if (L.tall) {
       ctx.textAlign = "left";
       ctx.fillStyle = C.muted;
       ctx.font = `500 ${fs}px ${SANS}`;

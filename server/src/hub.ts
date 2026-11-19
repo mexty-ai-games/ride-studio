@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { WebSocket } from "ws";
-import { BIN_FRAME, BIN_TTS, type ChangeEvent, type CostState, type Entity, type EpisodeSetup, type EpisodeState, type LayoutMode, type Readiness, type ServerToPhone, type StudioState, type TaskEvent, type TileState, type WorkerState } from "../../shared/protocol.js";
+import { BIN_FRAME, BIN_TTS, type ChangeEvent, type ContentLink, type CostState, type Entity, type EpisodeSetup, type EpisodeState, type LayoutMode, type Readiness, type ServerToPhone, type StudioState, type TaskEvent, type TileState, type WorkerState } from "../../shared/protocol.js";
 import { config } from "./config.js";
 import { Director } from "./director.js";
-import { deriveChange, ENTITY_LABEL, viewerUrl } from "./events.js";
-import { PreviewRenderer } from "./preview/renderer.js";
+import { deriveChange, ENTITY_LABEL, openUrl, viewerUrl } from "./events.js";
+import { LANDSCAPE, PORTRAIT, PreviewRenderer } from "./preview/renderer.js";
 import { store } from "./store.js";
 import { STT_PRICE_PER_MIN, STT_VENDORS, type SttVendor } from "./stt/index.js";
 import { streamTts, TTS_PRICE_PER_CHAR } from "./tts.js";
@@ -36,6 +36,9 @@ interface Target {
   doc: MockDoc;
   slot: number | null;
   propsId?: string;
+  /** An EdVerse game: its preview needs edverse=1. */
+  edverse?: boolean;
+  done?: boolean;
 }
 
 const SKILL = config.skillPath ? readFileSync(config.skillPath, "utf8").replace(/^---[\s\S]*?---\s*/, "") : "";
@@ -88,6 +91,18 @@ export class Hub {
         return "Noté.";
       },
       endEpisode: () => (this.endEpisode(), "Épisode terminé."),
+      arrive: () => this.arrive(),
+      pauseRecording: () => this.setRec("pause"),
+      resumeRecording: () => this.setRec("resume"),
+      switchCamera: () => this.setCamera(),
+      showContent: (name) => {
+        if (name === null) return void this.showContent(null), "Fermé.";
+        const c = this.findContent(name);
+        if (!c) return `Erreur : contenu introuvable. Contenus : ${this.contents().map((x) => x.name).join(", ") || "aucun"}.`;
+        void this.showContent(c.key);
+        return `${c.name} à l'écran.`;
+      },
+      showQr: (on) => this.setQr(on),
       stopAll: () => (setTimeout(() => this.stopAll(), 0), "Tout est arrêté. Ne dis rien : le studio l'annonce."),
       dispatch: (brief, target) => this.dispatch(brief, target),
       status: () => this.statusText(),
@@ -171,7 +186,7 @@ export class Hub {
       .map((t) => {
         const w = this.workers.find((x) => x.id === t.workerId)!;
         const last = this.lastChange.get(t.key);
-        return { slot: t.slot!, workerId: t.workerId, workerNo: w?.no ?? 0, entity: t.entity, entityId: t.entityId, title: t.title, step: last?.label ?? w?.step ?? "", lastChangeTs: last?.ts ?? 0, lastChange: last, mode: this.previews.modeOf(t.slot!) ?? "mock" };
+        return { slot: t.slot!, workerId: t.workerId, workerNo: w?.no ?? 0, entity: t.entity, entityId: t.entityId, title: t.title, step: last?.label ?? w?.step ?? "", lastChangeTs: last?.ts ?? 0, lastChange: last, mode: this.previews.modeOf(t.slot!) ?? "mock", url: this.contents().find((c) => c.key === t.key)?.url || undefined };
       })
       .sort((a, b) => a.slot - b.slot);
   }
@@ -186,7 +201,115 @@ export class Hub {
       cost: this.cost,
       readiness: this.readiness(),
       speaking: this.speaking,
+      rec: this.rec,
+      camera: this.camera,
+      show: this.show,
+      contents: this.contents(),
     };
+  }
+
+  // ---------- arrival, recording, showing ----------
+  private rec: StudioState["rec"] = "on";
+  private camera: StudioState["camera"] = "user";
+  private show: StudioState["show"] = { key: null, qr: false };
+
+  /** The contents built this episode, as the rider names them. A game's block is shown through its scene. */
+  contents(): ContentLink[] {
+    const front = store.settings.mexty.frontUrl;
+    const all = [...this.targets.values()];
+    const out: ContentLink[] = [];
+    for (const t of all) {
+      const siblings = all.filter((x) => x.workerId === t.workerId && x !== t);
+      if (t.entity === "block" && siblings.some((x) => x.entity === "scene")) continue;
+      const game = t.entity === "scene" ? siblings.find((x) => x.entity === "block") : undefined;
+      const demo = this.workers.find((w) => w.id === t.workerId)?.runner === "stub";
+      out.push({
+        key: t.key,
+        name: this.nameOf(t),
+        entity: t.entity,
+        title: t.title,
+        url: demo ? "" : openUrl(front, t.entity, t.entityId, { propsId: t.propsId, edverse: t.edverse, game: game && { blockId: game.entityId, propsId: game.propsId } }),
+        slot: t.slot,
+        done: !!t.done,
+      });
+    }
+    return out;
+  }
+
+  /** The ride is over: the chrono stops, but everything else (recording, building, the voice) goes on. */
+  arrive(): string {
+    const ep = this.episode;
+    if (!ep || ep.status !== "live") return "Aucun épisode en cours.";
+    if (ep.phase === "arrived") return "Déjà arrivés.";
+    ep.phase = "arrived";
+    ep.arrivedAt = Date.now();
+    this.announce("Arrivés. On continue de tourner.");
+    this.pushState();
+    return "OK.";
+  }
+
+  setRec(action: "pause" | "resume"): string {
+    if (this.episode?.status !== "live") return "Aucun épisode en cours.";
+    const next = action === "pause" ? "paused" : "on";
+    if (this.rec === next) return next === "paused" ? "Déjà en pause." : "Déjà en cours.";
+    if (next === "paused") {
+      // Said first, so the line is still in the file that is about to close.
+      this.announce("Pause.");
+      setTimeout(() => ((this.rec = "paused"), this.pushState()), 900);
+    } else {
+      this.rec = "on";
+      this.pushState();
+      setTimeout(() => this.announce("On tourne."), 600);
+      this.episode.beats.push({ label: "Reprise de l'enregistrement", ts: Date.now() });
+    }
+    return "OK.";
+  }
+
+  setCamera(facing?: StudioState["camera"]): string {
+    this.camera = facing ?? (this.camera === "user" ? "environment" : "user");
+    this.pushState();
+    return this.camera === "user" ? "Caméra avant." : "Caméra arrière.";
+  }
+
+  /** Show one content to someone: open on the phone, full picture and portrait in the recording. Null closes it. */
+  async showContent(key: string | null): Promise<string> {
+    const prev = this.show.key ? this.targets.get(this.show.key) : undefined;
+    if (prev?.slot != null && prev.key !== key) void this.previews.resize(prev.slot, LANDSCAPE);
+    if (!key) {
+      this.show = { key: null, qr: false };
+      this.focus = null;
+      this.pushState();
+      return "Fermé.";
+    }
+    const t = this.targets.get(key);
+    if (!t) return "Erreur : contenu inconnu.";
+    if (t.slot == null) await this.openTile(t);
+    this.show = { key, qr: this.show.key === key && this.show.qr };
+    this.focus = t.slot;
+    if (t.slot != null) void this.previews.resize(t.slot, PORTRAIT);
+    this.pushState();
+    return `${this.nameOf(t)} à l'écran.`;
+  }
+
+  setQr(on: boolean): string {
+    if (on && !this.show.key) {
+      const last = this.contents().at(-1);
+      if (!last) return "Erreur : aucun contenu à montrer.";
+      void this.showContent(last.key).then(() => ((this.show = { ...this.show, qr: true }), this.pushState()));
+      return "OK.";
+    }
+    this.show = { ...this.show, qr: on };
+    this.pushState();
+    return on ? "QR code affiché." : "QR code masqué.";
+  }
+
+  /** "Cours 1", "le programme", "la scène 3D" → the content the rider means. */
+  findContent(name: string): ContentLink | null {
+    const norm = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+    const list = this.contents();
+    const q = norm(name);
+    if (!q) return list.at(-1) ?? null;
+    return list.find((c) => norm(c.name) === q) ?? list.find((c) => norm(c.name).includes(q) || q.includes(norm(c.name))) ?? list.find((c) => c.title && norm(c.title).includes(q)) ?? (list.length === 1 ? list[0] : null);
   }
   /** What is on each screen, in the words the rider uses ("le deuxième écran"). */
   private screensText(): string {
@@ -196,13 +319,17 @@ export class Hub {
 
   private statusText(): string {
     if (!this.episode) return "Aucun épisode en cours.";
-    const left = Math.max(0, this.episode.setup.etaMin * 60 - (Date.now() - this.episode.startedAt) / 1000);
+    const left = Math.max(0, this.episode.setup.etaMin * 60 - ((this.episode.arrivedAt ?? Date.now()) - this.episode.startedAt) / 1000);
     const lines = [`Temps restant : ${Math.floor(left / 60)} min ${Math.floor(left % 60)} s. Dépense : ${this.cost.total.toFixed(2)} $ sur ${this.cost.cap} $.`];
     for (const w of this.workers) {
       const names = [...this.targets.values()].filter((t) => t.workerId === w.id).map((t) => this.nameOf(t)).join(", ");
       lines.push(`Demande ${w.no}${names ? ` (${names})` : ""} : ${w.status === "running" ? "en cours" : w.status === "done" ? "terminé" : w.status}, ${w.changes} changements. Brief : ${w.brief.slice(0, 120)}`);
     }
     lines.push(this.screensText());
+    const cs = this.contents();
+    if (cs.length) lines.push(`Contenus : ${cs.map((c) => `${c.name}${c.title ? ` « ${c.title.slice(0, 40)} »` : ""} (${c.done ? "terminé" : "en cours"})`).join(" ; ")}.`);
+    lines.push(this.episode.phase === "arrived" ? "Arrivés : le chrono est arrêté, l'enregistrement continue." : "En route.");
+    lines.push(this.rec === "paused" ? "Enregistrement en pause." : "Enregistrement en cours.");
     const s = this.episode.stats;
     lines.push(`Total : ${s.slides} écrans, ${s.questions} questions, ${s.nodes} étapes de parcours, ${s.objects} objets 3D.`);
     return lines.join("\n");
@@ -217,6 +344,8 @@ export class Hub {
     this.lastChange.clear();
     this.layout = "auto";
     this.focus = null;
+    this.rec = "on";
+    this.show = { key: null, qr: false };
     const cap = Math.max(1, Number(setup.budgetCap) || store.settings.budget.capUsd);
     this.cost = { director: 0, voice: 0, workers: 0, total: 0, cap, warned: false, capped: false };
     this.episode = {
@@ -225,6 +354,7 @@ export class Hub {
       setup: { ...setup, budgetCap: cap, etaMin: Math.max(1, Number(setup.etaMin) || 25) },
       startedAt: Date.now(),
       status: "live",
+      phase: "ride",
       beats: [],
       delivered: [],
       stats: { slides: 0, questions: 0, nodes: 0, objects: 0, changes: 0 },
@@ -249,7 +379,7 @@ export class Hub {
     ep.status = "ended";
     ep.endedAt = Date.now();
     const front = store.settings.mexty.frontUrl;
-    ep.delivered = [...this.targets.values()].map((t) => ({ entity: t.entity, entityId: t.entityId, title: t.title || ENTITY_LABEL[t.entity], url: this.workers.find((w) => w.id === t.workerId)?.runner === "stub" ? undefined : viewerUrl(front, t.entity, t.entityId).replace(/[?&]live=1(&embedded=1)?/, "") }));
+    ep.delivered = this.contents().map((c) => ({ entity: c.entity, entityId: c.key.split(":")[1], title: c.title || c.name, url: c.url || undefined }));
     store.addEpisode({ id: ep.id, no: ep.no, company: ep.setup.company, topic: ep.setup.topic, destination: ep.setup.destination, etaMin: ep.setup.etaMin, beats: ep.beats, startedAt: ep.startedAt, endedAt: ep.endedAt, cost: { director: this.cost.director, voice: this.cost.voice, workers: this.cost.workers, total: this.cost.total }, stats: ep.stats, delivered: ep.delivered });
     this.stopSpeaking();
     this.pushState();
@@ -510,6 +640,10 @@ export class Hub {
       }
     }
     if (title) t.title = t.doc.title = title;
+    if (ev.path.propsId) t.propsId = ev.path.propsId;
+    if (/game/.test(ev.tool ?? "")) t.edverse = true;
+    // A block preview shows the last saved props and the last build: reload it once the writes settle.
+    if (t.entity === "block" && t.slot != null) this.reloadSoon(t);
 
     // The same write arrives twice (tool call, then Mexty): show and count it once.
     const sig = `${key}:${ev.op}:${ev.path.slideId ?? ev.path.nodeId ?? ev.path.stepId ?? ev.path.objectId ?? ev.path.propsId ?? ""}`;
@@ -549,6 +683,18 @@ export class Hub {
     this.pushState();
   }
 
+  private reloads = new Map<string, NodeJS.Timeout>();
+  private reloadSoon(t: Target) {
+    clearTimeout(this.reloads.get(t.key));
+    this.reloads.set(
+      t.key,
+      setTimeout(() => {
+        this.reloads.delete(t.key);
+        if (t.slot != null) void this.previews.reload(t.slot, viewerUrl(store.settings.mexty.frontUrl, "block", t.entityId, { propsId: t.propsId }) + (t.edverse ? "&edverse=1" : ""));
+      }, 2500),
+    );
+  }
+
   /** What a piece of content is called aloud: "Cours 2", "Programme d'étude", "Évaluation 1". */
   private nameOf(t: Target): string {
     const same = [...this.targets.values()].filter((x) => x.entity === t.entity);
@@ -569,6 +715,7 @@ export class Hub {
     const main = mine.filter((t) => t.entity !== "block" || mine.every((x) => x.entity === "block"));
     if (!main.length) return this.announce("C'est fait.");
     for (const t of main) {
+      t.done = true;
       this.broadcast({ t: "cue", kind: "finished", entity: t.entity, slot: t.slot });
       this.announce(`${this.nameOf(t)} terminé${this.feminine(t) ? "e" : ""}.`);
     }
@@ -613,7 +760,7 @@ export class Hub {
       if (token) {
         const host = new URL(s.frontUrl).hostname;
         const domain = "." + host.split(".").slice(-2).join(".");
-        opts = { url: viewerUrl(s.frontUrl, t.entity, t.entityId, { propsId: t.propsId }), cookies: [{ name: "authToken", value: token, domain, path: "/", secure: true, httpOnly: false }] };
+        opts = { url: viewerUrl(s.frontUrl, t.entity, t.entityId, { propsId: t.propsId }) + (t.entity === "block" && t.edverse ? "&edverse=1" : ""), cookies: [{ name: "authToken", value: token, domain, path: "/", secure: true, httpOnly: false }] };
       }
     }
     try {

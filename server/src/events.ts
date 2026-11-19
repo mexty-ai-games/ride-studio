@@ -137,7 +137,24 @@ export function viewerUrl(front: string, entity: Entity, id: string, extra: { pr
     case "program": return `${front}/lms/programs?program=${id}&live=1`;
     case "evaluation": return `${front}/lms/evaluations/${id}/play?live=1`;
     case "scene": return `${front}/edverse/editor/${id}?live=1`;
-    case "block": return `${front}/block-viewer/${id}?live=1${extra.propsId ? `&propsId=${extra.propsId}` : ""}`;
+    case "block": return previewUrl(front, id, extra.propsId);
+  }
+}
+
+/** Mexty's block runtime page: the block with exactly this props variant. */
+export function previewUrl(front: string, blockId: string, propsId?: string, edverse = false): string {
+  return `${front}/preview.html?blockId=${blockId}${propsId ? `&propsId=${propsId}` : ""}${edverse ? "&edverse=1" : ""}`;
+}
+
+/** Where a finished content opens for someone to try it: the learner view, not the editor or live mode. */
+export function openUrl(front: string, entity: Entity, id: string, extra: { propsId?: string; edverse?: boolean; game?: { blockId: string; propsId?: string } } = {}): string {
+  switch (entity) {
+    case "course": return `${front}/lms/courses/${id}/slideshow?embedded=1`;
+    case "program": return `${front}/lms/programs?program=${id}`;
+    case "evaluation": return `${front}/lms/evaluations/${id}/play`;
+    case "block": return previewUrl(front, id, extra.propsId, extra.edverse);
+    // A scene is played through its game (the block that holds it); without one, the editor is all there is.
+    case "scene": return extra.game ? previewUrl(front, extra.game.blockId, extra.game.propsId, true) : `${front}/edverse/editor/${id}`;
   }
 }
 export const ENTITY_LABEL: Record<Entity, string> = { course: "COURS", program: "PARCOURS", evaluation: "ÉVALUATION", block: "BLOC", scene: "BLOC 3D" };

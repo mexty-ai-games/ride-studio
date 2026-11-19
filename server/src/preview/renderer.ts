@@ -6,10 +6,14 @@ import { config } from "../config.js";
 
 const MOCK_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "mock-viewer.html"), "utf8");
 
+/** Quality steps under back-pressure: scale of the tile's own size, and JPEG quality. */
 const SIZES = [
-  { w: 960, h: 600, q: 70 },
-  { w: 640, h: 400, q: 55 },
+  { k: 1, q: 70 },
+  { k: 0.66, q: 55 },
 ];
+export const LANDSCAPE = { w: 960, h: 600 };
+/** A content shown to someone is filmed the way it looks on a phone. */
+export const PORTRAIT = { w: 540, h: 960 };
 const MIN_INTERVAL_MS = 100; // 10 fps cap per tile
 
 interface Tile {
@@ -18,6 +22,9 @@ interface Tile {
   page: Page;
   cdp: CDPSession;
   mode: "mexty" | "mock";
+  url?: string;
+  w: number;
+  h: number;
   last: Buffer | null; // newest frame not yet sent
   lastSent: Buffer | null;
   timer: NodeJS.Timeout;
@@ -58,7 +65,7 @@ export class PreviewRenderer {
     if (!config.previews) return "mock";
     await this.close(slot);
     const browser = await this.launch();
-    const context = await browser.newContext({ viewport: { width: SIZES[0].w, height: SIZES[0].h }, deviceScaleFactor: 1, locale: "fr-FR", colorScheme: "light" });
+    const context = await browser.newContext({ viewport: { width: LANDSCAPE.w, height: LANDSCAPE.h }, deviceScaleFactor: 1, locale: "fr-FR", colorScheme: "light" });
     // The page is being filmed: Mexty's first-visit tour and first-run card must not sit over the content.
     await context.addInitScript(() => {
       const get = Storage.prototype.getItem;
@@ -80,7 +87,7 @@ export class PreviewRenderer {
     }
     if (mode === "mock") await page.setContent(MOCK_HTML, { waitUntil: "load" });
     const cdp = await context.newCDPSession(page);
-    const tile: Tile = { slot, context, page, cdp, mode, last: null, lastSent: null, sentAt: 0, level: 0, skipped: 0, cleanSince: Date.now(), timer: setInterval(() => this.tick(tile), MIN_INTERVAL_MS / 2) };
+    const tile: Tile = { slot, context, page, cdp, mode, url: opts.url, w: LANDSCAPE.w, h: LANDSCAPE.h, last: null, lastSent: null, sentAt: 0, level: 0, skipped: 0, cleanSince: Date.now(), timer: setInterval(() => this.tick(tile), MIN_INTERVAL_MS / 2) };
     cdp.on("Page.screencastFrame", (f) => {
       void cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }).catch(() => {});
       tile.last = Buffer.from(f.data, "base64");
@@ -93,7 +100,7 @@ export class PreviewRenderer {
   private async startCast(t: Tile) {
     const s = SIZES[t.level];
     await t.cdp.send("Page.stopScreencast").catch(() => {});
-    await t.cdp.send("Page.startScreencast", { format: "jpeg", quality: s.q, maxWidth: s.w, maxHeight: s.h, everyNthFrame: 1 });
+    await t.cdp.send("Page.startScreencast", { format: "jpeg", quality: s.q, maxWidth: Math.round(t.w * s.k), maxHeight: Math.round(t.h * s.k), everyNthFrame: 1 });
   }
 
   /** Send the newest frame at most 10×/s; under back-pressure skip, then step quality down, and recover when the link is clean. */
@@ -132,6 +139,24 @@ export class PreviewRenderer {
     const t = this.tiles.get(slot);
     if (t?.mode !== "mock") return;
     await t.page.evaluate((p) => (window as unknown as { __rs: { apply(p: unknown): void } }).__rs.apply(p), payload).catch(() => {});
+  }
+
+  /** Reload a real Mexty page, e.g. a block preview after its props or code changed. */
+  async reload(slot: number, url?: string) {
+    const t = this.tiles.get(slot);
+    if (!t || t.mode !== "mexty") return;
+    if (url) t.url = url;
+    await t.page.goto(t.url ?? t.page.url(), { waitUntil: "domcontentloaded", timeout: 15_000 }).catch(() => {});
+  }
+
+  /** Change the page size of a tile (landscape while building, portrait while showing it to someone). */
+  async resize(slot: number, size: { w: number; h: number }) {
+    const t = this.tiles.get(slot);
+    if (!t || (t.w === size.w && t.h === size.h)) return;
+    t.w = size.w;
+    t.h = size.h;
+    await t.page.setViewportSize({ width: size.w, height: size.h }).catch(() => {});
+    await this.startCast(t).catch(() => {});
   }
 
   modeOf(slot: number) {

@@ -3,6 +3,7 @@ import { createReadStream, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http";
 import { join } from "node:path";
 import express from "express";
+import QRCode from "qrcode";
 import { WebSocketServer, type WebSocket } from "ws";
 import { BIN_MIC, MIC_RATE, type ChangeEvent, type PhoneToServer, type ServerToPhone } from "../../shared/protocol.js";
 import { clearSession, isAuthed, issueSession, limited, requireAuth, safeEqual } from "./auth.js";
@@ -153,6 +154,15 @@ app.delete("/api/episodes/:id", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- QR code of a content link (drawn on the phone and into the recording) ----
+app.get("/api/qr.svg", requireAuth, async (req, res) => {
+  const u = String(req.query.u ?? "");
+  if (!/^https:\/\//.test(u) || u.length > 600) return void res.status(400).end();
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.setHeader("Cache-Control", "private, max-age=86400");
+  res.send(await QRCode.toString(u, { type: "svg", errorCorrectionLevel: "M", margin: 2, color: { dark: "#0B1640", light: "#FFFFFF" } }));
+});
+
 // ---- bake-off recordings ----
 const bakeDir = join(config.dataDir, "bakeoff");
 mkdirSync(bakeDir, { recursive: true });
@@ -297,6 +307,16 @@ function phoneSocket(ws: WebSocket) {
         return hub.stopSpeaking();
       case "stop":
         return hub.stopAll();
+      case "arrive":
+        return void hub.arrive();
+      case "rec":
+        return void hub.setRec(m.action === "pause" ? "pause" : "resume");
+      case "camera":
+        return void hub.setCamera(m.facing === "user" || m.facing === "environment" ? m.facing : undefined);
+      case "show":
+        return void hub.showContent(typeof m.key === "string" ? m.key : null);
+      case "qr":
+        return void hub.setQr(!!m.on);
       case "text":
         if (typeof m.text === "string" && m.text.trim()) hub.userTurn(m.text.trim().slice(0, 600));
         return;

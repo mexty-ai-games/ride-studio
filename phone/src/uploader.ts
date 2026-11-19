@@ -1,4 +1,4 @@
-import { allRecordingIds, chunksOf } from "./recorder";
+import { allRecordingIds, chunksOf, openRecordings } from "./recorder";
 import { useApp } from "./store";
 
 /**
@@ -37,11 +37,9 @@ export async function syncUploads(): Promise<void> {
   }
   running = true;
   try {
-    const app = useApp.getState();
-    const liveId = app.recording ? app.studio?.episode?.id : null;
     for (const id of await allRecordingIds()) {
       const { episodeId, rec } = parse(id);
-      if (episodeId === liveId) continue; // still being written
+      if (openRecordings.has(id)) continue; // still being written
       const base = `/api/recordings/${episodeId}/${rec}`;
       const patch = (p: Partial<UploadState>) => useApp.setState((s) => ({ uploads: { ...s.uploads, [id]: { ...(s.uploads[id] ?? { sent: 0, total: 0, done: false }), ...p } } }));
       try {

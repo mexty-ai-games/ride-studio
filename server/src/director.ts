@@ -17,6 +17,12 @@ export interface DirectorActions {
   setEpisode(setup: Partial<EpisodeSetup>): string;
   endEpisode(): string;
   stopAll(): string;
+  arrive(): string;
+  pauseRecording(): string;
+  resumeRecording(): string;
+  switchCamera(): string;
+  showContent(name: string | null): string;
+  showQr(on: boolean): string;
   dispatch(brief: string, target?: number): string;
   status(): string;
   setLayout(mode: LayoutMode): string;
@@ -31,7 +37,13 @@ const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: { company: { type: "string" }, destination: { type: "string" }, eta_min: { type: "number" }, topic: { type: "string" } }, additionalProperties: false },
   },
   { name: "stop_all", description: "Arrêt d'urgence : stoppe immédiatement tout ce qui est en construction. À appeler dès que Fabien dit « stop », « arrête tout », « on arrête ». L'épisode et l'enregistrement continuent.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
-  { name: "end_episode", description: "Termine l'épisode et l'enregistrement. À l'arrivée, ou si Fabien le demande.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "arrive", description: "Fabien est arrivé : le chrono s'arrête, mais l'enregistrement et tout le reste continuent (il va montrer la formation). À appeler quand il dit « on est arrivés », « je suis arrivé ».", input_schema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "pause_recording", description: "Met l'enregistrement vidéo en pause (la voix et les sons continuent). « pause », « coupe l'enregistrement ».", input_schema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "resume_recording", description: "Reprend l'enregistrement vidéo. « on reprend », « tu peux enregistrer ».", input_schema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "switch_camera", description: "Bascule entre la caméra avant (Fabien) et la caméra arrière (filmer une autre personne).", input_schema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "show_content", description: "Ouvre un contenu terminé sur le téléphone pour qu'une personne le teste, et le met en grand dans la vidéo. name = le nom annoncé (« Cours 1 », « Programme d'étude », « Scène 3D 1 »), ou vide pour le dernier. close=true pour refermer.", input_schema: { type: "object", properties: { name: { type: "string" }, close: { type: "boolean" } }, additionalProperties: false } },
+  { name: "show_qr", description: "Affiche (on=true) ou masque (on=false) le QR code du contenu montré, pour qu'une personne l'ouvre sur son propre téléphone.", input_schema: { type: "object", properties: { on: { type: "boolean" } }, required: ["on"], additionalProperties: false } },
+  { name: "end_episode", description: "Termine définitivement l'épisode et l'enregistrement. Seulement si Fabien dit clairement que l'épisode est fini (« on termine l'épisode », « c'est fini pour aujourd'hui ») : pour « on est arrivés », utilise arrive.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   {
     name: "dispatch_task",
     description:
@@ -55,6 +67,7 @@ Ta voix est entendue dans la vidéo. Règles :
 - Pour tout travail de contenu, appelle dispatch_task puis confirme en quelques mots. Une demande qui modifie un contenu en cours reprend ce contenu (target). Un contenu différent est un nouvel appel sans target.
 - Dès que Fabien donne l'entreprise, la destination, la durée du trajet ou le sujet, appelle set_episode.
 - Il peut y avoir plusieurs écrans à l'image. Ne dis jamais combien il y en a sans l'avoir vérifié dans les événements ou avec get_status. Si focus_tile échoue, appelle get_status et réessaie avec le bon numéro.
+- Les outils arrive, pause_recording, resume_recording, show_content, show_qr et switch_camera annoncent eux-mêmes ce qu'ils font : après eux, réponds exactement « … ».
 - N'annonce jamais toi-même qu'un contenu est terminé : le studio le dit à ta place (« Cours 1 terminé. »). Ne prétends jamais qu'un contenu existe.
 - Les messages entre crochets [événements] viennent du studio, pas de Fabien. Réponds exactement « … », sauf s'ils te demandent explicitement de prévenir Fabien : alors une phrase très courte.`;
 
@@ -221,6 +234,18 @@ export class Director {
           return this.actions.setEpisode({ company: typeof a.company === "string" ? a.company : undefined, destination: typeof a.destination === "string" ? a.destination : undefined, topic: typeof a.topic === "string" ? a.topic : undefined, etaMin: Number(a.eta_min) > 0 ? Number(a.eta_min) : undefined });
         case "stop_all":
           return this.actions.stopAll();
+        case "arrive":
+          return this.actions.arrive();
+        case "pause_recording":
+          return this.actions.pauseRecording();
+        case "resume_recording":
+          return this.actions.resumeRecording();
+        case "switch_camera":
+          return this.actions.switchCamera();
+        case "show_content":
+          return this.actions.showContent(a.close ? null : typeof a.name === "string" ? a.name : "");
+        case "show_qr":
+          return this.actions.showQr(!!a.on);
         case "end_episode":
           return this.actions.endEpisode();
         case "dispatch_task":
@@ -246,21 +271,26 @@ export class Director {
   private stubTurn(text: string) {
     if (text.startsWith("[événements]")) return;
     const t = text.toLowerCase();
-    if (/^(stop|arrête)\b|arrête tout/.test(t)) {
-      this.actions.stopAll();
-    } else if (/termin|arriv|fini/.test(t) && /épisode|on est|je suis|c'est/.test(t)) {
+    if (/^(stop|arrête)\b|arrête tout/.test(t)) this.actions.stopAll();
+    else if (/termine l'épisode|fin de l'épisode|c'est fini pour aujourd'hui/.test(t)) {
       this.actions.endEpisode();
-      this.speak("On est arrivés, je coupe.");
-    } else if (/plein écran|zoom|montre/.test(t)) {
+      this.speak("Épisode terminé.");
+    } else if (/arriv/.test(t)) this.actions.arrive();
+    else if (/\bpause\b|coupe l'enregistrement/.test(t)) this.actions.pauseRecording();
+    else if (/reprend|on tourne|tu peux enregistrer/.test(t)) this.actions.resumeRecording();
+    else if (/caméra|camera/.test(t)) this.speak(this.actions.switchCamera());
+    else if (/\bqr\b/.test(t)) this.actions.showQr(!/enlève|cache|masque/.test(t));
+    else if (/ferme/.test(t)) this.actions.showContent(null);
+    else if (/montre|ouvre/.test(t) && /cours|parcours|programme|évaluation|scène|formation|bloc|activité/.test(t)) {
+      const r = this.actions.showContent(t.replace(/.*?(montre|ouvre)( moi| nous)?( le| la| l'| les)?\s*/, ""));
+      if (r.startsWith("Erreur")) this.speak("Je ne trouve pas ce contenu.");
+    } else if (/plein écran|zoom/.test(t)) {
       this.actions.focusTile(1);
       this.speak("En grand.");
-    } else if (/où en|statut|avance/.test(t)) {
-      this.speak(this.actions.status().split("\n")[0]);
-    } else if (/cours|formation|parcours|scène|3d|quiz|évaluation|question|ajoute|change|rends|modifie/.test(t)) {
+    } else if (/où en|statut|avance/.test(t)) this.speak(this.actions.status().split("\n")[0]);
+    else if (/cours|formation|parcours|scène|3d|quiz|évaluation|question|ajoute|change|rends|modifie/.test(t)) {
       const r = this.actions.dispatch(text, /rends|change|modifie/.test(t) ? 1 : undefined);
       this.speak(r.startsWith("Erreur") ? "Impossible pour l'instant." : "C'est parti.");
-    } else {
-      this.speak("Mode démo, sans clé Claude.");
-    }
+    } else this.speak("Mode démo, sans clé Claude.");
   }
 }
