@@ -597,6 +597,27 @@ export class Hub {
     this.director.interrupt();
     this.broadcast({ t: "tts.cancel" });
   }
+  /**
+   * The brief as the worker receives it: what the director wrote, then the episode and the recent conversation,
+   * so the director does not have to copy them into the tool call (a long call could be cut).
+   */
+  private withContext(brief: string): string {
+    const ep = this.episode;
+    if (!ep) return brief;
+    const who = (l: { who: string; name?: string }) => (l.who === "fabien" ? "Fabien" : l.who === "claude" ? "Studio (voix)" : l.who === "guest" ? (l.name ?? "Invité") : "Studio");
+    const lines: string[] = [];
+    let size = 0;
+    // The most recent exchanges first in the budget, then put back in order.
+    for (const l of [...this.transcript].reverse()) {
+      const line = `- ${who(l)} : ${l.text}`;
+      if (size + line.length > 6000 || lines.length >= 40) break;
+      lines.unshift(line);
+      size += line.length;
+    }
+    const setup = [ep.setup.company && `entreprise ${ep.setup.company}`, ep.setup.destination && `destination ${ep.setup.destination}`, ep.setup.topic && `sujet ${ep.setup.topic}`].filter(Boolean).join(", ");
+    return `${brief}\n\n---\nContexte joint par le studio (pour information ; le brief ci-dessus prime) :\nÉpisode ${ep.no}${setup ? ` · ${setup}` : ""}.${lines.length ? `\nDerniers échanges :\n${lines.join("\n")}` : ""}`;
+  }
+
   /** A turn from the transcription: who said it (see speakers.ts) and in which language go to Claude with it. */
   userTurn(text: string, meta: { dgSpeaker?: number; language?: string } = {}) {
     const who = this.speakers.identify({ dgSpeaker: meta.dgSpeaker });
@@ -638,7 +659,7 @@ export class Hub {
     // Follow-ups stay on the runner that holds the session.
     const sticky = w.resume ? w.runner : null;
     const deviceId = sticky && sticky !== "device" ? null : this.devices.pick(w.deviceId);
-    const spec: TaskSpec = { taskId: `${w.id}:${Date.now()}`, brief, resume: w.resume, model: s.claude.workerModel, allowedTools: s.claude.allowedTools, systemAppend: SKILL + (s.claude.workspace ? `\n\nEspace de travail Mexty par défaut : ${s.claude.workspace}.` : ""), maxTurns: s.claude.maxTurns };
+    const spec: TaskSpec = { taskId: `${w.id}:${Date.now()}`, brief: this.withContext(brief), resume: w.resume, model: s.claude.workerModel, allowedTools: s.claude.allowedTools, systemAppend: SKILL + (s.claude.workspace ? `\n\nEspace de travail Mexty par défaut : ${s.claude.workspace}.` : ""), maxTurns: s.claude.maxTurns };
     const emit = (e: TaskEvent) => this.onTaskEvent(w, e);
     w.status = "running";
     w.writes = 0;

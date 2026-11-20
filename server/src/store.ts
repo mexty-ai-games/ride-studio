@@ -48,7 +48,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   claude: {
-    directorModel: "claude-haiku-5-5",
+    directorModel: "claude-sonnet-5-5",
     workerModel: "claude-sonnet-5-5",
     allowedTools: ["mcp__MEXTY", "mcp__EDVERSE"],
     maxTurns: 120,
@@ -144,8 +144,12 @@ function load(): Db {
   if (!existsSync(file)) return empty;
   try {
     const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<Db>;
+    const settings = merge(structuredClone(DEFAULT_SETTINGS), raw.settings);
+    // Haiku is no longer used for the voice or the workers: a saved Haiku choice moves to Sonnet.
+    if (/haiku/.test(settings.claude.directorModel)) settings.claude.directorModel = "claude-sonnet-5-5";
+    if (/haiku/.test(settings.claude.workerModel)) settings.claude.workerModel = "claude-sonnet-5-5";
     return {
-      settings: merge(structuredClone(DEFAULT_SETTINGS), raw.settings),
+      settings,
       secrets: raw.secrets ?? {},
       devices: raw.devices ?? [],
       episodes: raw.episodes ?? [],

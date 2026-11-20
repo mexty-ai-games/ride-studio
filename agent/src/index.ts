@@ -97,7 +97,8 @@ async function pair() {
 }
 
 function claudeVersion(): Promise<string | null> {
-  return new Promise((res) => execFile(platform() === "win32" ? "claude.cmd" : "claude", ["--version"], { timeout: 8000, shell: platform() === "win32" }, (err, out) => res(err ? null : out.trim().split("\n")[0])));
+  // On Windows the shell finds claude.exe (native install) as well as claude.cmd (npm install).
+  return new Promise((res) => execFile("claude", ["--version"], { timeout: 8000, shell: platform() === "win32" }, (err, out) => res(err ? null : out.trim().split("\n")[0])));
 }
 
 // Rough list prices (USD / Mtok: input, output, cache read) for the running estimate; the final figure comes from the SDK.
@@ -301,5 +302,5 @@ async function daemon() {
 }
 
 if (process.argv[2] === "pair") void pair();
-else if (process.argv[2] === "status") console.log(existsSync(cfgFile) ? `Paired with ${load()?.server} as "${load()?.name}"` : "Not paired.");
+else if (process.argv[2] === "status" || process.argv.includes("--status")) console.log(existsSync(cfgFile) ? `Paired with ${load()?.server} as "${load()?.name}"` : "Not paired.");
 else void daemon();
