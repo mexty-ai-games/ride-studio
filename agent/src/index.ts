@@ -7,7 +7,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import WebSocket from "ws";
 import { serverAllowed, serverOf, type DeviceToServer, type ServerToDevice, type TaskEvent, type TaskRun } from "../../shared/protocol.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const dir = join(homedir(), ".ride-agent");
 const cfgFile = join(dir, "config.json");
 const workDir = join(dir, "work"); // neutral cwd: no project settings, no repository
@@ -33,6 +33,44 @@ function save(c: Cfg) {
     chmodSync(cfgFile, 0o600);
   } catch {
     /* Windows */
+  }
+}
+/** Verbose logs: full tool inputs and outputs (`npm run agent -- --verbose`, or RIDE_AGENT_VERBOSE=1). */
+const VERBOSE = process.argv.includes("--verbose") || process.env.RIDE_AGENT_VERBOSE === "1";
+const clock = () => new Date().toTimeString().slice(0, 8);
+const oneLine = (v: unknown, max: number) => {
+  const s = (typeof v === "string" ? v : JSON.stringify(v) ?? "").replace(/\s+/g, " ").trim();
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+};
+/** One line per thing that happens, prefixed with the time and, for a task, its short id. */
+function log(msg: string, task?: string) {
+  console.log(`${clock()} ${task ? `[${task}] ` : ""}${msg}`);
+}
+/** What a task is doing, as it happens: what Claude Code says, each MEXTY / EDVERSE call and how it went. */
+function logEvent(tag: string, e: TaskEvent, started: number) {
+  switch (e.kind) {
+    case "init":
+      log(`Claude Code ready · model ${e.model} · MCP: ${e.mcpServers.map((m) => `${m.name} (${m.status})`).join(", ") || "none"}`, tag);
+      break;
+    case "text":
+      log(`says: ${oneLine(e.text, VERBOSE ? 2000 : 160)}`, tag);
+      break;
+    case "tool_use":
+      log(`→ ${e.name.replace(/^mcp__/, "")} ${oneLine(e.input, VERBOSE ? 4000 : 140)}`, tag);
+      break;
+    case "tool_result":
+      if (e.isError || VERBOSE) log(`${e.isError ? "✗" : "✓"} ${(e.name ?? "").replace(/^mcp__/, "")} ${oneLine(e.output, VERBOSE ? 4000 : 240)}`, tag);
+      else log(`✓ ${(e.name ?? "").replace(/^mcp__/, "")}`, tag);
+      break;
+    case "result":
+      log(`${e.ok ? "done" : "stopped"} in ${Math.round((Date.now() - started) / 1000)} s · ${e.turns} turns · $${(e.costUsd ?? 0).toFixed(3)} · ${oneLine(e.summary, 200)}`, tag);
+      break;
+    case "error":
+      log(`ERROR: ${e.message}`, tag);
+      break;
+    case "plan":
+      if (e.fiveHour) log(`Claude plan: ${Math.round(e.fiveHour.pct)} % of the 5-hour window used`, tag);
+      break;
   }
 }
 const arg = (flag: string) => {
@@ -178,17 +216,44 @@ async function daemon() {
   const active = new Map<string, AbortController>();
   let backoff = 1000;
 
+  let retry: NodeJS.Timeout | null = null;
+  const url = cfg.server.replace(/^http/, "ws") + "/ws/device";
+  log(`ride-agent ${VERSION} · Claude Code ${version ?? "not found on PATH"} · server ${cfg.server} · device "${cfg.name}"${VERBOSE ? " · verbose" : ""}`);
+
   const connect = () => {
+    retry = null;
     // Outbound only: no inbound port is opened on this machine.
-    const ws = new WebSocket(cfg.server.replace(/^http/, "ws") + "/ws/device", { headers: { Authorization: `Bearer ${cfg.token}` } });
+    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${cfg.token}` } });
     const send = (m: DeviceToServer) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(m));
     let ping: NodeJS.Timeout | null = null;
+    let lastPong = Date.now();
+    // Every way a connection can end leads here, once: retry with a growing delay.
+    let ended = false;
+    const reconnect = (why: string) => {
+      if (ended) return;
+      ended = true;
+      if (ping) clearInterval(ping);
+      log(`disconnected (${why}) · retrying in ${Math.round(backoff / 1000)} s`);
+      retry = setTimeout(connect, backoff);
+      backoff = Math.min(30_000, backoff * 2);
+    };
     ws.on("open", () => {
       backoff = 1000;
-      console.log(`[ride-agent] connected to ${cfg.server} as "${cfg.name}"`);
+      lastPong = Date.now();
+      log(`connected to ${cfg.server} as "${cfg.name}" · waiting for tasks`);
       send({ t: "hello", name: cfg.name, platform: `${platform()} · node ${process.versions.node}`, agentVersion: VERSION, claudeCodeVersion: version, mcpServers: cfg.mcpServers ?? [], concurrency: cfg.concurrency });
-      ping = setInterval(() => (ws.ping(), send({ t: "status", active: [...active.keys()], concurrency: cfg.concurrency })), 25_000);
+      ping = setInterval(() => {
+        // A socket a proxy dropped silently never closes by itself: no answer to our pings for 75 s ends it.
+        if (Date.now() - lastPong > 75_000) {
+          log("no answer from the server for 75 s");
+          ws.terminate();
+          return;
+        }
+        ws.ping();
+        send({ t: "status", active: [...active.keys()], concurrency: cfg.concurrency });
+      }, 25_000);
     });
+    ws.on("pong", () => (lastPong = Date.now()));
     ws.on("message", (raw) => {
       let m: ServerToDevice;
       try {
@@ -196,33 +261,41 @@ async function daemon() {
       } catch {
         return;
       }
-      if (m.t === "task.run") {
+      if (m.t === "welcome") {
+        if (VERBOSE) log(`server knows this device as "${m.name}"`);
+      } else if (m.t === "task.run") {
         const task = m;
-        console.log(`[ride-agent] task ${task.taskId.slice(0, 8)} ${task.resume ? "(resume)" : "(new)"}: ${task.brief.slice(0, 80)}`);
+        const tag = task.taskId.slice(0, 8);
+        const started = Date.now();
+        log(`new task${task.resume ? " (continues a session)" : ""} · ${task.model} · ${oneLine(task.brief, VERBOSE ? 4000 : 200)}`, tag);
         const ctl = runTask(cfg, task, (event) => {
+          logEvent(tag, event, started);
           if (event.kind === "result" || event.kind === "error") active.delete(task.taskId);
           send({ t: "task.event", taskId: task.taskId, event });
         });
         active.set(task.taskId, ctl);
       } else if (m.t === "task.stop") {
         if (m.taskId === "*") {
-          console.log(`[ride-agent] stop all (${active.size} running)`);
+          log(`stop all (${active.size} running)`);
           for (const ctl of active.values()) ctl.abort();
-        } else active.get(m.taskId)?.abort();
+        } else {
+          log("stop", m.taskId.slice(0, 8));
+          active.get(m.taskId)?.abort();
+        }
       }
     });
-    ws.on("unexpected-response", (_q, res) => {
+    ws.on("unexpected-response", (req, res) => {
       if (res.statusCode === 401) {
-        console.error("[ride-agent] this device is no longer paired. Pair it again from Settings.");
+        log(`this device is no longer paired (401). Pair it again from Settings: npm run agent -- pair <code> --server ${cfg.server}`);
         process.exit(2);
       }
+      // A 502/503 while the server restarts, a 404 on a wrong address: say so, and try again. Before, the
+      // agent stopped here silently and never reconnected.
+      req.destroy();
+      reconnect(`HTTP ${res.statusCode}${res.statusCode === 404 ? ": is the server address right?" : ""}`);
     });
-    ws.on("error", (e) => console.warn(`[ride-agent] ${e.message}`));
-    ws.on("close", () => {
-      if (ping) clearInterval(ping);
-      setTimeout(connect, backoff);
-      backoff = Math.min(30_000, backoff * 2);
-    });
+    ws.on("error", (e) => reconnect(e.message));
+    ws.on("close", (code, reason) => reconnect(`closed ${code}${reason.length ? ` ${reason.toString()}` : ""}`));
   };
   connect();
 }
