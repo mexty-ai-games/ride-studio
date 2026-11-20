@@ -112,6 +112,17 @@ export function recordingsRouter(isKnownEpisode: (id: string) => boolean): Route
     res.json({ ok: true, bytes: c.bytes });
   });
 
+  /** A frame of the session (the 16:9 picture), for the card on fabien.ninja. */
+  r.put("/:episodeId/thumb", express.raw({ type: "image/jpeg", limit: "3mb" }), (req, res) => {
+    const { episodeId } = req.params;
+    const body = req.body as Buffer;
+    if (!UUID.test(episodeId) || !Buffer.isBuffer(body) || body.length < 100 || body[0] !== 0xff || body[1] !== 0xd8) return void res.status(400).json({ error: "bad image" });
+    if (!isKnownEpisode(episodeId)) return void res.status(404).json({ error: "Épisode inconnu" });
+    mkdirSync(join(root, episodeId), { recursive: true });
+    writeFileSync(join(root, episodeId, "thumb.jpg"), body);
+    res.json({ ok: true });
+  });
+
   /** Play or download. `sendFile` handles Range requests, so seeking works. */
   r.get("/:episodeId/:file", (req, res) => {
     const { episodeId, file } = req.params;
@@ -124,6 +135,63 @@ export function recordingsRouter(isKnownEpisode: (id: string) => boolean): Route
     res.sendFile(path, { headers: { "Content-Type": m[2] === "mp4" ? "video/mp4" : "video/webm" }, lastModified: true });
   });
 
+  return r;
+}
+
+const sessionView = (e: (typeof store.episodes)[number], base: string) => {
+  const videos = videosOf(e.id).filter((v) => v.complete);
+  const thumb = existsSync(join(root, e.id, "thumb.jpg"));
+  return {
+    no: e.no,
+    title: e.topic || e.company || `Session ${e.no}`,
+    company: e.company,
+    destination: e.destination ?? "",
+    topic: e.topic,
+    startedAt: e.startedAt,
+    endedAt: e.endedAt,
+    durationSec: Math.round((e.endedAt - e.startedAt) / 1000),
+    stats: e.stats,
+    beats: (e.beats ?? []).map((b) => ({ label: b.label, atSec: Math.round((b.ts - e.startedAt) / 1000) })),
+    // A public Mexty link opens without an account; the plain link needs Fabien's workspace.
+    delivered: e.delivered.map((d) => ({ kind: d.entity, title: d.title, url: d.publicUrl ?? null })),
+    videos: videos.map((v) => ({ variant: v.variant, part: v.part, url: `${base}/api/public/sessions/${e.no}/${v.file}` })),
+    thumb: thumb ? `${base}/api/public/sessions/${e.no}/thumb.jpg` : null,
+  };
+};
+
+/**
+ * What fabien.ninja shows (Ride Studio Sessions): every finished, published episode, its videos served from this
+ * volume, the trainings it delivered (public Mexty links) and its transcript. No key: everything here is public.
+ */
+export function publicSessionsRouter(): Router {
+  const r = express.Router();
+  const base = () => config.publicUrl.replace(/\/$/, "");
+  const published = () => [...store.episodes].filter((e) => e.published !== false).sort((a, b) => b.endedAt - a.endedAt);
+  const byNo = (no: string) => published().find((e) => String(e.no) === no);
+  r.use((_req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  });
+  r.get("/", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=30");
+    res.json({ sessions: published().map((e) => sessionView(e, base())) });
+  });
+  r.get("/:no", (req, res) => {
+    const e = byNo(req.params.no);
+    if (!e) return void res.status(404).json({ error: "not found" });
+    res.setHeader("Cache-Control", "public, max-age=30");
+    res.json({ ...sessionView(e, base()), transcript: (e.transcript ?? []).map((l) => ({ atSec: Math.max(0, Math.round((l.ts - e.startedAt) / 1000)), who: l.who, text: l.text })) });
+  });
+  r.get("/:no/:file", (req, res) => {
+    const e = byNo(req.params.no);
+    const m = /^(?:((?:tall|wide)(?:-p[1-9][0-9]?)?)\.(mp4|webm)|thumb\.jpg)$/.exec(req.params.file);
+    if (!e || !m) return void res.status(404).end();
+    const path = join(root, e.id, req.params.file);
+    if (!existsSync(path)) return void res.status(404).end();
+    if (m[1] && !readCursor(e.id, m[1])?.complete) return void res.status(404).end();
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.sendFile(path, { headers: { "Content-Type": m[2] ? (m[2] === "mp4" ? "video/mp4" : "video/webm") : "image/jpeg" }, lastModified: true });
+  });
   return r;
 }
 

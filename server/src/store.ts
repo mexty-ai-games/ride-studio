@@ -84,7 +84,16 @@ export interface EpisodeRecord {
   endedAt: number;
   cost: { director: number; total: number; elevenlabs?: number; otherApis?: number; cloud?: number; planEquivalent?: number; voice?: number; workers?: number; plan?: unknown };
   stats: Record<string, number>;
-  delivered: { entity: string; entityId: string; title: string; url?: string }[];
+  delivered: { entity: string; entityId: string; title: string; url?: string; publicUrl?: string }[];
+  /** What was said during the session: the rider (and guests), Claude, and the studio's events. */
+  transcript?: TranscriptLine[];
+  /** Shown on fabien.ninja (Ride Studio Sessions). On unless the rider hides it from the library. */
+  published?: boolean;
+}
+export interface TranscriptLine {
+  ts: number;
+  who: "fabien" | "claude" | "studio";
+  text: string;
 }
 
 interface Db {
@@ -210,6 +219,13 @@ export const store = {
   addEpisode(e: EpisodeRecord) {
     db.episodes.push(e);
     save();
+  },
+  updateEpisode(id: string, patch: Partial<EpisodeRecord>) {
+    const e = db.episodes.find((x) => x.id === id);
+    if (!e) return null;
+    Object.assign(e, patch);
+    save();
+    return e;
   },
   removeEpisode(id: string) {
     db.episodes = db.episodes.filter((e) => e.id !== id);

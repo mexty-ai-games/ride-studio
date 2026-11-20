@@ -10,7 +10,7 @@ import { clearSession, isAuthed, issueSession, limited, requireAuth, safeEqual }
 import { config } from "./config.js";
 import { Hub } from "./hub.js";
 import { radio, radioRouter } from "./radio.js";
-import { deleteVideos, diskUsage, recordingsBytes, recordingsRouter, videosOf } from "./recordings.js";
+import { deleteVideos, diskUsage, publicSessionsRouter, recordingsBytes, recordingsRouter, videosOf } from "./recordings.js";
 import { SECRET_NAMES, store, type SecretName } from "./store.js";
 import { openStt, STT_VENDORS, type SttSession, type SttVendor } from "./stt/index.js";
 import { listVoices } from "./tts.js";
@@ -140,6 +140,14 @@ app.get("/api/voices", requireAuth, async (_req, res) => {
 });
 
 // ---- episode library: past episodes and their videos on the volume ----
+app.use("/api/public/sessions", publicSessionsRouter());
+// Show or hide an episode on fabien.ninja.
+app.patch("/api/episodes/:id", requireAuth, (req, res) => {
+  if (typeof req.body?.published !== "boolean") return void res.status(400).json({ error: "published attendu" });
+  const e = store.updateEpisode(String(req.params.id), { published: req.body.published });
+  if (!e) return void res.status(404).json({ error: "Épisode inconnu" });
+  res.json({ ok: true, published: e.published });
+});
 app.use("/api/recordings", recordingsRouter((id) => store.episodes.some((e) => e.id === id) || hub.liveEpisodeId === id));
 app.get("/api/episodes", requireAuth, (_req, res) => {
   res.json({

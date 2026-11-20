@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./index.css";
+import "./thumb";
 
 if ("serviceWorker" in navigator && location.protocol === "https:") void navigator.serviceWorker.register("/sw.js").catch(() => {});
 createRoot(document.getElementById("root")!).render(

@@ -7,7 +7,7 @@ interface Video { rec: string; variant: "tall" | "wide"; part: number; bytes: nu
 interface Episode {
   id: string; no: number; company: string; topic: string; destination?: string; startedAt: number; endedAt: number;
   cost: { total: number }; stats: Record<string, number>; beats?: { label: string; ts: number }[];
-  delivered: { entity: string; entityId: string; title: string; url?: string }[]; videos: Video[];
+  delivered: { entity: string; entityId: string; title: string; url?: string; publicUrl?: string }[]; videos: Video[]; published?: boolean;
 }
 interface Data { episodes: Episode[]; storage: { freeBytes: number; totalBytes: number; usedBytes: number } }
 const gb = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} Go` : `${Math.round(n / 1e6)} Mo`);
@@ -87,6 +87,10 @@ export function Library() {
                     {e.delivered.some((d) => d.url && d.entityId) && (
                       <button onClick={() => set({ screen: "poster", poster: { items: e.delivered.filter((d) => d.url && d.entityId), place: e.company || e.destination || "", back: "library" } })} className="w-fit rounded-full border border-line bg-field px-3 py-1 text-xs font-semibold text-text">Affiche QR</button>
                     )}
+                    <label className="mt-1 flex w-fit items-center gap-2 text-xs font-semibold text-text">
+                      <input type="checkbox" checked={e.published !== false} onChange={(ev) => void api(`/api/episodes/${e.id}`, { method: "PATCH", json: { published: ev.target.checked } }).then(load)} />
+                      Sur fabien.ninja (Ride Studio Sessions)
+                    </label>
                     <div className="mt-1 flex gap-2">
                       {e.videos.length > 0 && <button onClick={() => confirm("Supprimer les vidéos de cet épisode du serveur ?") && void api(`/api/episodes/${e.id}/videos`, { method: "DELETE" }).then(load)} className="h-9 rounded-full border border-line bg-field px-3 text-xs font-semibold text-text">Supprimer les vidéos</button>}
                       <button onClick={() => confirm(`Supprimer l'épisode ${e.no} et ses vidéos ?`) && void api(`/api/episodes/${e.id}`, { method: "DELETE" }).then(load)} className="h-9 rounded-full border border-line bg-field px-3 text-xs font-semibold text-bad">Supprimer l'épisode</button>

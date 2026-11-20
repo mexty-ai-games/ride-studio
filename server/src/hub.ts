@@ -74,6 +74,12 @@ export class Hub {
   private ttsBusy = false;
   private ttsAbort: AbortController | null = null;
   private sayId = 0;
+  /** This episode's transcript, saved with it and shown on fabien.ninja. */
+  private transcript: { ts: number; who: "fabien" | "claude" | "studio"; text: string }[] = [];
+  private line(who: "fabien" | "claude" | "studio", text: string) {
+    if (this.episode?.status !== "live" || !text.trim() || this.transcript.length >= 2000) return;
+    this.transcript.push({ ts: Date.now(), who, text: text.trim().slice(0, 800) });
+  }
   private lastSaid = "";
   speaking = false;
 
@@ -139,6 +145,12 @@ export class Hub {
   );
 
   constructor() {
+    // Episodes from before public links (or whose links failed): give them one, for fabien.ninja.
+    setTimeout(() => {
+      void (async () => {
+        for (const e of store.episodes) if (e.published !== false && e.delivered.some((d) => d.url && !d.publicUrl)) await this.publishLinks(e.id);
+      })();
+    }, 15_000).unref();
     this.share.onGuest = (name, joined) => (joined ? this.guestJoined(name) : this.guestLeft(name));
     this.devices.onChange = () => this.pushState();
     setInterval(() => void this.checkMexty(), 5 * 60_000).unref();
@@ -308,10 +320,12 @@ export class Hub {
 
   /** A guest joined through the QR code: the voice knows who is talking with it. */
   guestJoined(name: string) {
+    this.line("studio", `${name} rejoint le trajet.`);
     this.director.note(`${name} a rejoint le trajet et peut te parler comme Fabien.`);
     this.announce(`${name} nous rejoint.`);
   }
   guestLeft(name: string) {
+    this.line("studio", `${name} quitte le trajet.`);
     this.director.note(`${name} a quitté le trajet.`);
   }
 
@@ -435,6 +449,7 @@ export class Hub {
     this.focus = null;
     this.rec = "on";
     this.show = { key: null, qr: false };
+    this.transcript = [];
     const cap = Math.max(1, Number(setup.budgetCap) || store.settings.budget.capUsd);
     this.cost = { director: 0, elevenlabs: 0, otherApis: 0, cloud: 0, planEquivalent: 0, total: 0, cap, warned: false, capped: false, plan: null };
     this.episode = {
@@ -472,7 +487,8 @@ export class Hub {
     ep.endedAt = Date.now();
     const front = store.settings.mexty.frontUrl;
     ep.delivered = this.contents().map((c) => ({ entity: c.entity, entityId: c.key.split(":")[1], title: c.title || c.name, url: c.url || undefined }));
-    store.addEpisode({ id: ep.id, no: ep.no, company: ep.setup.company, topic: ep.setup.topic, destination: ep.setup.destination, etaMin: ep.setup.etaMin, beats: ep.beats, startedAt: ep.startedAt, endedAt: ep.endedAt, cost: { director: this.cost.director, elevenlabs: this.cost.elevenlabs, otherApis: this.cost.otherApis, cloud: this.cost.cloud, planEquivalent: this.cost.planEquivalent, total: this.cost.total, plan: this.cost.plan }, stats: ep.stats, delivered: ep.delivered });
+    store.addEpisode({ id: ep.id, no: ep.no, company: ep.setup.company, topic: ep.setup.topic, destination: ep.setup.destination, etaMin: ep.setup.etaMin, beats: ep.beats, startedAt: ep.startedAt, endedAt: ep.endedAt, cost: { director: this.cost.director, elevenlabs: this.cost.elevenlabs, otherApis: this.cost.otherApis, cloud: this.cost.cloud, planEquivalent: this.cost.planEquivalent, total: this.cost.total, plan: this.cost.plan }, stats: ep.stats, delivered: ep.delivered, transcript: this.transcript, published: true });
+    void this.publishLinks(ep.id);
     this.stopSpeaking();
     this.radioOn = false;
     this.pushState();
@@ -530,6 +546,7 @@ export class Hub {
 
   // ---------- voice out ----------
   private say(text: string) {
+    this.line("claude", text);
     const id = ++this.sayId;
     const key = store.secret("elevenlabs");
     this.broadcast({ t: "say", id, text, audio: !!key });
@@ -577,6 +594,7 @@ export class Hub {
     this.broadcast({ t: "tts.cancel" });
   }
   userTurn(text: string) {
+    this.line("fabien", text);
     this.broadcast({ t: "user", text });
     this.director.user(text);
   }
@@ -953,6 +971,26 @@ export class Hub {
     } catch (e) {
       return { error: `Mexty ne répond pas (${(e as Error).message}).` };
     }
+  }
+
+  /** Public Mexty links for what the episode delivered, so fabien.ninja visitors open it without an account. */
+  private async publishLinks(episodeId: string) {
+    const rec = store.episodes.find((e) => e.id === episodeId);
+    if (!rec) return;
+    const delivered = [...rec.delivered];
+    for (const d of delivered) {
+      if (d.publicUrl || !d.url) continue;
+      let propsId: string | undefined;
+      try {
+        propsId = new URL(d.url).searchParams.get("propsId") || undefined;
+      } catch {
+        /* not a URL */
+      }
+      const r = await this.publicLink(d.entity, d.entityId, propsId);
+      if ("url" in r) d.publicUrl = r.url;
+      else console.warn(`[sessions] no public link for ${d.entity} ${d.entityId}: ${r.error}`);
+    }
+    store.updateEpisode(episodeId, { delivered });
   }
 
   /** Short service session for Fabien's workspace, minted by the Mexty backend against the shared secret. */
