@@ -931,6 +931,30 @@ export class Hub {
     this.pushState();
   }
 
+  /**
+   * A Mexty public link for a delivered content (anyone opens it, logged out, until it is turned off), for the
+   * QR poster left on site. A learning path opens with every course and activity in it.
+   */
+  async publicLink(entity: string, entityId: string, propsId?: string): Promise<{ url: string; code: string; visits: number } | { error: string }> {
+    const kind = entity === "program" ? "program" : entity === "course" ? "course" : entity === "block" || entity === "scene" ? "block" : null;
+    if (!kind) return { error: "Ce contenu ne peut pas avoir de lien public (une évaluation, par exemple)." };
+    const token = await this.mextyToken();
+    if (!token) return { error: "Mexty n'est pas joignable." };
+    try {
+      const r = await fetch(`${store.settings.mexty.apiUrl}/api/public-links`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, id: entityId, propsId: propsId || undefined }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const j = (await r.json().catch(() => ({}))) as { link?: { code: string; path: string; visits: number }; error?: string };
+      if (!r.ok || !j.link) return { error: j.error || `Mexty a refusé (HTTP ${r.status}).` };
+      return { url: `${store.settings.mexty.frontUrl.replace(/\/$/, "")}${j.link.path}`, code: j.link.code, visits: j.link.visits };
+    } catch (e) {
+      return { error: `Mexty ne répond pas (${(e as Error).message}).` };
+    }
+  }
+
   /** Short service session for Fabien's workspace, minted by the Mexty backend against the shared secret. */
   private async mextyToken(): Promise<string | null> {
     if (!config.rideSecret) return null;

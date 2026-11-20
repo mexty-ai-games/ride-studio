@@ -1,7 +1,14 @@
 import { create } from "zustand";
 import type { ChangeEvent, StudioState } from "../../shared/protocol";
 
-export type Screen = "setup" | "live" | "arrival" | "settings" | "bakeoff" | "library";
+export type Screen = "setup" | "live" | "arrival" | "settings" | "bakeoff" | "library" | "poster";
+/** A delivered content the QR poster can point to. */
+export interface PosterItem {
+  entity: string;
+  entityId: string;
+  title: string;
+  url?: string;
+}
 export interface SttLine {
   vendor: string;
   kind: string;
@@ -30,6 +37,8 @@ interface AppState {
   /** Guests in the shared ride. */
   guests: { identity: string; name: string }[];
   uploads: Record<string, { sent: number; total: number; done: boolean; error?: string }>;
+  /** The QR poster being made: what it can point to, the place, and the screen to go back to. */
+  poster: { items: PosterItem[]; place: string; back: Screen } | null;
   set: (p: Partial<AppState>) => void;
   error: (m: string) => void;
 }
@@ -60,6 +69,7 @@ export const useApp = create<AppState>((set) => ({
   opened: null,
   guests: [],
   uploads: {},
+  poster: null,
   set,
   error: (m) => set((s) => ({ errors: [...s.errors.slice(-3), m] })),
 }));

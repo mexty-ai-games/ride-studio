@@ -115,6 +115,14 @@ export function Arrival() {
           )}
         </div>
 
+        {ep.delivered.some((d) => d.url) && (
+          <button
+            onClick={() => set({ screen: "poster", poster: { items: ep.delivered.filter((d) => d.url), place: ep.setup.company || ep.setup.destination, back: "arrival" } })}
+            className="card h-12 rounded-[18px] text-[15px] font-bold text-text"
+          >
+            Affiche QR à laisser sur place
+          </button>
+        )}
         <div className="grid grid-cols-3 gap-2.5">
           <button onClick={() => set({ screen: "setup" })} className="card h-14 rounded-[18px] text-[15px] font-bold text-text">Nouvel épisode</button>
           <button disabled={!first?.url} onClick={() => first?.url && window.open(first.url, "_blank", "noopener")} className="card h-14 rounded-[18px] text-[15px] font-bold text-text">Ouvrir la formation</button>

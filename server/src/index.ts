@@ -179,6 +179,15 @@ app.get("/api/ride/join/:code", (req, res) => {
   res.json({ episodeNo: ep.no, company: ep.setup.company, destination: ep.setup.destination });
 });
 
+// ---- QR poster: a public Mexty link for a delivered content, to print and leave on site ----
+app.post("/api/poster/link", requireAuth, async (req, res) => {
+  const entity = String(req.body?.entity ?? ""), entityId = String(req.body?.entityId ?? "");
+  if (!/^[a-f0-9]{24}$/i.test(entityId)) return void res.status(400).json({ error: "Contenu invalide." });
+  const propsId = typeof req.body?.propsId === "string" && /^[\w-]{1,64}$/.test(req.body.propsId) ? req.body.propsId : undefined;
+  const r = await hub.publicLink(entity, entityId, propsId);
+  res.status("error" in r ? 502 : 200).json(r);
+});
+
 // ---- QR code of a content link (drawn on the phone and into the recording) ----
 app.get("/api/qr.svg", requireAuth, async (req, res) => {
   const u = String(req.query.u ?? "");

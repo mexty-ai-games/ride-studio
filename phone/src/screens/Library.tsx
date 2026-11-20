@@ -7,7 +7,7 @@ interface Video { rec: string; variant: "tall" | "wide"; part: number; bytes: nu
 interface Episode {
   id: string; no: number; company: string; topic: string; destination?: string; startedAt: number; endedAt: number;
   cost: { total: number }; stats: Record<string, number>; beats?: { label: string; ts: number }[];
-  delivered: { title: string; url?: string }[]; videos: Video[];
+  delivered: { entity: string; entityId: string; title: string; url?: string }[]; videos: Video[];
 }
 interface Data { episodes: Episode[]; storage: { freeBytes: number; totalBytes: number; usedBytes: number } }
 const gb = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} Go` : `${Math.round(n / 1e6)} Mo`);
@@ -84,6 +84,9 @@ export function Library() {
                     <span>{[e.stats.slides && `${e.stats.slides} écrans`, e.stats.questions && `${e.stats.questions} questions`, e.stats.nodes && `${e.stats.nodes} étapes`, e.stats.objects && `${e.stats.objects} objets 3D`].filter(Boolean).join(" · ") || `${e.stats.changes ?? 0} changements`}</span>
                     {e.beats?.length ? <span>Moments : {e.beats.map((b) => `${fmtClock((b.ts - e.startedAt) / 1000)} ${b.label}`).join(" · ")}</span> : null}
                     {e.delivered.filter((d) => d.url).map((d) => <a key={d.url} href={d.url} target="_blank" rel="noopener" className="font-semibold text-accent-text">Ouvrir « {d.title} »</a>)}
+                    {e.delivered.some((d) => d.url && d.entityId) && (
+                      <button onClick={() => set({ screen: "poster", poster: { items: e.delivered.filter((d) => d.url && d.entityId), place: e.company || e.destination || "", back: "library" } })} className="w-fit rounded-full border border-line bg-field px-3 py-1 text-xs font-semibold text-text">Affiche QR</button>
+                    )}
                     <div className="mt-1 flex gap-2">
                       {e.videos.length > 0 && <button onClick={() => confirm("Supprimer les vidéos de cet épisode du serveur ?") && void api(`/api/episodes/${e.id}/videos`, { method: "DELETE" }).then(load)} className="h-9 rounded-full border border-line bg-field px-3 text-xs font-semibold text-text">Supprimer les vidéos</button>}
                       <button onClick={() => confirm(`Supprimer l'épisode ${e.no} et ses vidéos ?`) && void api(`/api/episodes/${e.id}`, { method: "DELETE" }).then(load)} className="h-9 rounded-full border border-line bg-field px-3 text-xs font-semibold text-bad">Supprimer l'épisode</button>
