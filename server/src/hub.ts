@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { WebSocket } from "ws";
 import { BIN_FRAME, BIN_TTS, type ChangeEvent, type ContentLink, type PlanWindow, type CostState, type Entity, type EpisodeSetup, type EpisodeState, type LayoutMode, type Readiness, type ServerToPhone, type StudioState, type TaskEvent, type TileState, type WorkerState } from "../../shared/protocol.js";
 import { config } from "./config.js";
-import { livekit, ShareHub } from "./ride-share.js";
+import { ShareHub } from "./ride-share.js";
 import { Director } from "./director.js";
 import { deriveChange, editorUrl, ENTITY_LABEL, openUrl, viewerUrl } from "./events.js";
 import { LANDSCAPE, PORTRAIT, PreviewRenderer } from "./preview/renderer.js";
@@ -139,6 +139,7 @@ export class Hub {
   );
 
   constructor() {
+    this.share.onGuest = (name, joined) => (joined ? this.guestJoined(name) : this.guestLeft(name));
     this.devices.onChange = () => this.pushState();
     setInterval(() => void this.checkMexty(), 5 * 60_000).unref();
     setInterval(() => this.checkStalls(), 10_000).unref();
@@ -185,7 +186,7 @@ export class Hub {
       cloud,
       mexty: this.mextyOk,
       stub: devicesOnline === 0 && !cloud,
-      share: livekit.configured,
+      share: true,
     };
   }
   private tiles(): TileState[] {

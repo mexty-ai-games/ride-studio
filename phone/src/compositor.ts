@@ -332,7 +332,7 @@ export class Compositor {
     this.footer(ctx, L, s, u);
   }
 
-  /** Guests who joined the ride (LiveKit): their camera is drawn beside the rider's, in the recording too. */
+  /** Guests who joined the ride (WebRTC): their camera is drawn beside the rider's, in the recording too. */
   guests = new Map<string, { video: HTMLVideoElement; name: string }>();
 
   private drawPerson(ctx: CanvasRenderingContext2D, r: Rect, v: HTMLVideoElement | null, mirror: boolean, name: string, radius: number, u: number) {

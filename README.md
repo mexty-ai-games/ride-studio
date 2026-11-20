@@ -40,7 +40,7 @@ Music under the episode. The library lives on the volume under `radio/` (Réglag
 
 ## Share the ride (guests)
 
-"Partager" on the Live screen shows a QR code. A guest scans it, types a first name and joins the ride in a LiveKit room: they see the picture being recorded and hear the rider and Claude. Their camera is drawn into the recording next to the rider's, and their voice is mixed into the recording and into the transcription, so they talk to Claude the same way. Guests configure nothing; the invite ends with the episode.
+"Partager" on the Live screen shows a QR code. A guest scans it, types a first name and joins the ride in plain WebRTC (peer to peer with the rider's phone, signalled through Ride Studio's `/ws/rtc`; nothing else to run — set `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL` only if some mobile networks refuse the direct route): they see the picture being recorded and hear the rider and Claude. Their camera is drawn into the recording next to the rider's, and their voice is mixed into the recording and into the transcription, so they talk to Claude the same way. Guests configure nothing; the invite ends with the episode.
 
 Set `LIVEKIT_URL` (wss://…), `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` on the Ride Studio service.
 

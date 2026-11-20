@@ -14,7 +14,6 @@ import { deleteVideos, diskUsage, recordingsBytes, recordingsRouter, videosOf } 
 import { SECRET_NAMES, store, type SecretName } from "./store.js";
 import { openStt, STT_VENDORS, type SttSession, type SttVendor } from "./stt/index.js";
 import { listVoices } from "./tts.js";
-import { livekit } from "./ride-share.js";
 
 const hub = new Hub();
 const app = express();
@@ -160,30 +159,24 @@ app.delete("/api/episodes/:id", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---- Partager le trajet: guests join through a QR code (LiveKit) ----
-app.post("/api/ride/share", requireAuth, (_req, res) => {
+// ---- Partager le trajet: guests join through a QR code (WebRTC, signalled over /ws/rtc) ----
+app.post("/api/ride/share", requireAuth, (req, res) => {
   const ep = hub.state().episode;
-  if (!livekit.configured) return void res.status(503).json({ error: "LiveKit n'est pas configuré (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)." });
   if (!ep || ep.status !== "live") return void res.status(409).json({ error: "Aucun épisode en cours." });
   const inv = hub.share.inviteFor(ep.id);
   // The address the host is using (ride.mexty.ai), so the QR opens the same app.
-  const base = _req.get("host") ? `${_req.protocol}://${_req.get("host")}` : config.publicUrl;
-  res.json({ url: `${base}/join/${inv.code}`, livekitUrl: livekit.url, room: inv.room, token: hub.share.hostToken(ep.id), guests: [...inv.guests.values()] });
+  const base = req.get("host") ? `${req.protocol}://${req.get("host")}` : config.publicUrl;
+  res.json({ url: `${base}/join/${inv.code}` });
+});
+app.delete("/api/ride/share", requireAuth, (_req, res) => {
+  hub.share.close();
+  res.json({ ok: true });
 });
 app.get("/api/ride/join/:code", (req, res) => {
   const inv = hub.share.find(String(req.params.code));
   const ep = hub.state().episode;
   if (!inv || !ep || ep.id !== inv.episodeId || ep.status !== "live") return void res.status(404).json({ error: "Ce trajet est terminé ou le lien n'est plus valable." });
   res.json({ episodeNo: ep.no, company: ep.setup.company, destination: ep.setup.destination });
-});
-app.post("/api/ride/join/:code", (req, res) => {
-  if (limited(`join:${req.ip}`, 20, 10 * 60_000)) return void res.status(429).json({ error: "Trop d'essais." });
-  const inv = hub.share.find(String(req.params.code));
-  const ep = hub.state().episode;
-  if (!inv || !ep || ep.id !== inv.episodeId || ep.status !== "live" || !livekit.configured) return void res.status(404).json({ error: "Ce trajet est terminé ou le lien n'est plus valable." });
-  const name = String(req.body?.name ?? "").replace(/[^\p{L}\p{N} '\-]/gu, "").trim().slice(0, 30) || "Invité";
-  const g = hub.share.guestToken(inv, name);
-  res.json({ livekitUrl: livekit.url, room: inv.room, token: g.token, identity: g.identity, name });
 });
 
 // ---- QR code of a content link (drawn on the phone and into the recording) ----
@@ -236,6 +229,7 @@ if (config.phoneDist) {
 const server = createServer(app);
 const phoneWss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
 const deviceWss = new WebSocketServer({ noServer: true, maxPayload: 4 << 20 });
+const rtcWss = new WebSocketServer({ noServer: true, maxPayload: 64 << 10 });
 
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url || "/", "http://x");
@@ -249,6 +243,22 @@ server.on("upgrade", (req, socket, head) => {
     if (origin && new URL(origin).host !== req.headers.host) return deny(403);
     if (!isAuthed(req)) return deny(401);
     phoneWss.handleUpgrade(req, socket, head, (ws) => phoneSocket(ws));
+  } else if (url.pathname === "/ws/rtc") {
+    // WebRTC signalling for "Partager le trajet": the rider's phone (cookie) or a guest (invite code).
+    const origin = req.headers.origin;
+    if (origin && new URL(origin).host !== req.headers.host) return deny(403);
+    const code = url.searchParams.get("code");
+    if (!code) {
+      if (!isAuthed(req)) return deny(401);
+      return rtcWss.handleUpgrade(req, socket, head, (ws) => hub.share.attachHost(ws));
+    }
+    if (limited(`rtc:${req.socket.remoteAddress}`, 30, 10 * 60_000)) return deny(429);
+    const inv = hub.share.find(code);
+    const ep = hub.state().episode;
+    if (!inv || !ep || ep.id !== inv.episodeId || ep.status !== "live") return deny(404);
+    rtcWss.handleUpgrade(req, socket, head, (ws) => {
+      if (!hub.share.attachGuest(ws, code, url.searchParams.get("name") ?? "")) ws.close(4000, "full");
+    });
   } else if (url.pathname === "/ws/device") {
     const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
     const record = token ? store.deviceByToken(token) : null;
@@ -349,8 +359,6 @@ function phoneSocket(ws: WebSocket) {
         return void hub.showContent(typeof m.key === "string" ? m.key : null);
       case "qr":
         return void hub.setQr(!!m.on);
-      case "guest":
-        return void (m.joined ? hub.guestJoined(String(m.name).slice(0, 30)) : hub.guestLeft(String(m.name).slice(0, 30)));
       case "radio":
         return void hub.setRadio(m.action === "off" ? "off" : m.action === "next" ? "next" : "on");
       case "radio.ended":
