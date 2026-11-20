@@ -661,11 +661,13 @@ export class Hub {
         // Real runners exist but are all busy: do not silently fake the work.
         w.status = "error";
         w.error = "Tous les appareils sont occupés et le cloud est désactivé";
+        console.warn(`[dispatch] task ${w.no} not started: every machine is busy (${this.devices.view().map((d) => `${d.name} ${d.activeSessions}/${d.concurrency}`).join(", ")})`);
         this.announce("Impossible de lancer ça pour l'instant.");
       } else if (paired.length) {
         // A machine is paired but offline: fake content would only pass for real work. Say it instead.
         w.status = "error";
         w.error = `${paired.map((d) => d.name).join(", ")} hors ligne : lance npm run agent sur la machine`;
+        console.warn(`[dispatch] task ${w.no} not started: ${paired.map((d) => d.name).join(", ")} offline`);
         this.note(w, `erreur · ${w.error}`);
         this.announce(`${paired[0].name} est hors ligne.`);
       } else {

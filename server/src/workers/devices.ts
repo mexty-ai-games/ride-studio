@@ -7,8 +7,11 @@ interface Link {
   ws: WebSocket;
   record: DeviceRecord;
   hello: DeviceHello | null;
-  tasks: Map<string, Emit>;
+  /** Tasks sent to this machine, with when they were sent. */
+  tasks: Map<string, { emit: Emit; at: number }>;
 }
+
+const log = (msg: string) => console.log(`[devices] ${msg}`);
 
 /** Paired machines that keep an outbound WebSocket open to this backend. */
 export class DeviceHub {
@@ -17,6 +20,7 @@ export class DeviceHub {
 
   attach(ws: WebSocket, record: DeviceRecord) {
     this.links.get(record.id)?.ws.close(4000, "replaced");
+    log(`"${record.name}" connected`);
     const link: Link = { ws, record, hello: null, tasks: new Map() };
     this.links.set(record.id, link);
     this.send(link, { t: "welcome", deviceId: record.id, name: record.name });
@@ -32,10 +36,23 @@ export class DeviceHub {
         link.hello = m;
         record.platform = m.platform;
         record.claudeCodeVersion = m.claudeCodeVersion;
+        log(`"${record.name}" ready · ${m.platform} · agent ${m.agentVersion} · Claude Code ${m.claudeCodeVersion ?? "?"}`);
         store.touchDevices();
         this.onChange();
+      } else if (m.t === "status") {
+        // The machine says what it is running. A task it does not know any more (its process restarted, or the
+        // final event was lost) would hold a slot for ever and every later dispatch would find it "busy".
+        const running = new Set(m.active);
+        for (const [taskId, t] of link.tasks) {
+          if (running.has(taskId) || Date.now() - t.at < 30_000) continue;
+          log(`"${record.name}" no longer runs task ${taskId.slice(0, 8)}: freeing its slot`);
+          link.tasks.delete(taskId);
+          t.emit({ kind: "error", message: `La tâche a été perdue par « ${record.name} »` });
+          this.onChange();
+        }
       } else if (m.t === "task.event") {
-        link.tasks.get(m.taskId)?.(m.event);
+        if (m.event.kind === "result" || m.event.kind === "error") log(`"${record.name}" task ${m.taskId.slice(0, 8)}: ${m.event.kind === "error" ? `error · ${m.event.message}` : m.event.ok ? "done" : "stopped"}`);
+        link.tasks.get(m.taskId)?.emit(m.event);
         if (m.event.kind === "result" || m.event.kind === "error") {
           link.tasks.delete(m.taskId);
           this.onChange();
@@ -44,8 +61,9 @@ export class DeviceHub {
     });
     ws.on("close", () => {
       if (this.links.get(record.id) !== link) return;
+      log(`"${record.name}" disconnected${link.tasks.size ? ` with ${link.tasks.size} task(s) running` : ""}`);
       this.links.delete(record.id);
-      for (const emit of link.tasks.values()) emit({ kind: "error", message: `Appareil « ${record.name} » déconnecté` });
+      for (const t of link.tasks.values()) t.emit({ kind: "error", message: `Appareil « ${record.name} » déconnecté` });
       this.onChange();
     });
     this.onChange();
@@ -73,7 +91,8 @@ export class DeviceHub {
       emit({ kind: "error", message: "Appareil hors ligne" });
       return { stop() {} };
     }
-    link.tasks.set(spec.taskId, emit);
+    link.tasks.set(spec.taskId, { emit, at: Date.now() });
+    log(`task ${spec.taskId.slice(0, 8)} sent to "${link.record.name}" (${link.tasks.size}/${link.record.concurrency} slots)`);
     this.send(link, { t: "task.run", ...spec });
     this.onChange();
     return { stop: () => this.send(link, { t: "task.stop", taskId: spec.taskId }) };
