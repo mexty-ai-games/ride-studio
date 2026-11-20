@@ -55,7 +55,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "dispatch_task",
     description:
-      "Lance la construction d'un contenu Mexty réel (parcours, cours, évaluation, activité ou scène 3D EdVerse). Revient immédiatement. Sans `target` : nouveau contenu, en parallèle des autres. Avec `target` = le numéro rendu au lancement : on poursuit ce contenu avec le même contexte (ex. « rends le quiz plus dur »). Un contenu par appel : deux cours = deux appels. Le brief doit être autonome : entreprise, public, sujet, ce qui est attendu, langue, et demander une construction par petites étapes visibles (pour la 3D : un objet par appel edit_scene).",
+      "Lance la construction d'un contenu Mexty réel (parcours, cours, évaluation, activité ou scène 3D EdVerse). Revient immédiatement. Sans `target` : nouveau contenu, en parallèle des autres. Avec `target` = le numéro rendu au lancement : on poursuit ce contenu avec le même contexte (ex. « rends le quiz plus dur »). Un contenu par appel : deux cours = deux appels. Le brief dit ce qui est attendu : entreprise, public, sujet, langue, et une construction par petites étapes visibles (pour la 3D : un objet par appel edit_scene). Le studio joint de lui-même au brief l'épisode et les derniers échanges de la conversation (qui a dit quoi) : inutile de les recopier.",
     input_schema: { type: "object", properties: { brief: { type: "string" }, target: { type: "integer", description: "Numéro rendu au lancement du contenu à poursuivre" } }, required: ["brief"], additionalProperties: false },
   },
   { name: "get_status", description: "Avancement des contenus, liste des écrans à l'image, temps restant et budget.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
@@ -205,10 +205,10 @@ export class Director {
         const stream = client.messages.stream(
           {
             model,
-            // Room for the thinking (Sonnet) and a full brief in dispatch_task. 300 cut long briefs mid-call: the
-            // tool got no brief, refused it, and the director retried for ever ("je réessaie avec le brief
-            // complet"). What is spoken stays short through the prompt, not through this cap.
-            max_tokens: 4096,
+            // No tight cap: a brief can be long (300 cut it mid-call, and the director retried for ever: "je
+            // réessaie avec le brief complet"). The request streams, so a large ceiling costs nothing unless
+            // used. What is spoken stays short through the prompt, not through this cap.
+            max_tokens: 64000,
             // Latency first: the least thinking the model accepts, low effort.
             ...(thinkingFor(model).thinking ? { thinking: thinkingFor(model).thinking } : {}),
             output_config: { effort: "low" },

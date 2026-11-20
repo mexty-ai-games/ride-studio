@@ -128,8 +128,8 @@ export function Settings() {
         {tab === "Claude Code" && (
           <>
             <h2 className="m-0 mb-1 font-display text-xl font-extrabold">Claude Code</h2>
-            <Row label="Modèle des workers"><select className="field" value={st.claude.workerModel} onChange={(e) => void patch({ claude: { workerModel: e.target.value } })}>{["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5", "claude-fable-5-2"].map((m) => <option key={m}>{m}</option>)}</select></Row>
-            <Row label="Modèle de la co-animatrice" hint="Haiku pour répondre en moins d'une seconde."><select className="field" value={st.claude.directorModel} onChange={(e) => void patch({ claude: { directorModel: e.target.value } })}>{["claude-haiku-5-5", "claude-sonnet-5-5"].map((m) => <option key={m}>{m}</option>)}</select></Row>
+            <Row label="Modèle des workers"><select className="field" value={st.claude.workerModel} onChange={(e) => void patch({ claude: { workerModel: e.target.value } })}>{["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"].map((m) => <option key={m}>{m}</option>)}</select></Row>
+            <Row label="Modèle de la co-animatrice"><select className="field" value={st.claude.directorModel} onChange={(e) => void patch({ claude: { directorModel: e.target.value } })}>{["claude-sonnet-5-5", "claude-opus-5-5"].map((m) => <option key={m}>{m}</option>)}</select></Row>
             <Row label="Profil de permissions" hint="Les workers n'ont accès à aucun autre outil : ni fichiers, ni terminal, ni web.">
               <div className="flex flex-wrap gap-1.5">{st.claude.allowedTools.map((t) => <span key={t} className="rounded-full bg-chip-on px-2.5 py-1 text-xs font-bold">{t.replace("mcp__", "")}</span>)}<span className="self-center text-xs text-muted">uniquement</span></div>
             </Row>
