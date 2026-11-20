@@ -22,6 +22,9 @@ interface Worker extends WorkerState {
   queue: string[]; // follow-up briefs received while a run is in progress
   costBase: number; // cost of finished runs; the current run reports a cumulative figure
   lastEventAt?: number; // any sign of life from the runner (reads, thinking, writes)
+  /** What the runner did, for Réglages → Journal: tool calls, refusals, errors. */
+  log: { ts: number; line: string }[];
+  writes: number; // successful MCP writes recognised as a content change, this run
 }
 interface MockDoc {
   title: string;
@@ -194,7 +197,7 @@ export class Hub {
   state(): StudioState {
     return {
       episode: this.episode,
-      workers: this.workers.map(({ running: _r, pendingCalls: _p, queue: _q, resume: _s, costBase: _c, deviceId: _d, lastEventAt: _l, ...w }) => w),
+      workers: this.workers.map(({ running: _r, pendingCalls: _p, queue: _q, resume: _s, costBase: _c, deviceId: _d, lastEventAt: _l, log: _g, writes: _x, ...w }) => w),
       tiles: this.tiles(),
       layout: this.layout,
       focus: this.focus,
@@ -493,7 +496,7 @@ export class Hub {
       return "OK, relancé.";
     }
     if (this.workers.filter((w) => w.status === "running" || w.status === "queued").length >= 6) return "Erreur : trop de contenus en parallèle. Poursuis un contenu existant avec target.";
-    const w: Worker = { id: randomUUID(), no: this.workers.length + 1, brief, runner: "stub", status: "queued", step: "", changes: 0, costUsd: 0, startedAt: Date.now(), pendingCalls: new Map(), queue: [], costBase: 0 };
+    const w: Worker = { id: randomUUID(), no: this.workers.length + 1, brief, runner: "stub", status: "queued", step: "", changes: 0, costUsd: 0, startedAt: Date.now(), pendingCalls: new Map(), queue: [], costBase: 0, log: [], writes: 0 };
     this.workers.push(w);
     this.launch(w, brief);
     return `OK, lancé (numéro ${w.no}).`;
@@ -507,6 +510,7 @@ export class Hub {
     const spec: TaskSpec = { taskId: `${w.id}:${Date.now()}`, brief, resume: w.resume, model: s.claude.workerModel, allowedTools: s.claude.allowedTools, systemAppend: SKILL + (s.claude.workspace ? `\n\nEspace de travail Mexty par défaut : ${s.claude.workspace}.` : ""), maxTurns: s.claude.maxTurns };
     const emit = (e: TaskEvent) => this.onTaskEvent(w, e);
     w.status = "running";
+    w.writes = 0;
     w.startedAt = Date.now();
     w.lastEventAt = Date.now();
     w.brief = brief;
@@ -561,8 +565,23 @@ export class Hub {
     }
   }
 
+  /** Recent journal of every worker, newest episode first (Réglages → Journal). */
+  journal() {
+    return this.workers.map((w) => ({ no: w.no, runner: w.runner, device: w.deviceName ?? "", status: w.status, brief: w.brief.slice(0, 160), error: w.error ?? "", log: w.log.slice(-60) }));
+  }
+  private note(w: Worker, line: string) {
+    w.log.push({ ts: Date.now(), line: line.slice(0, 300) });
+    if (w.log.length > 200) w.log.splice(0, w.log.length - 200);
+    console.log(`[worker ${w.no}] ${line.slice(0, 300)}`);
+  }
+
   private onTaskEvent(w: Worker, e: TaskEvent) {
     w.lastEventAt = Date.now();
+    if (e.kind === "init") this.note(w, `début · ${e.model} · MCP : ${e.mcpServers.map((s) => `${s.name}=${s.status}`).join(", ") || "aucun"}`);
+    else if (e.kind === "text") this.note(w, `texte · ${e.text}`);
+    else if (e.kind === "tool_use") this.note(w, `appel · ${e.name}`);
+    else if (e.kind === "result") this.note(w, `fin · ${e.ok ? "ok" : "échec"} · ${e.turns} tours · ${e.summary}`);
+    else if (e.kind === "error") this.note(w, `erreur · ${e.message}`);
     switch (e.kind) {
       case "init":
         w.resume = e.sessionId;
@@ -578,6 +597,8 @@ export class Hub {
         w.pendingCalls.delete(e.id);
         if (!call || e.isError) break;
         const d = deriveChange(call.name, call.input, e.output);
+        this.note(w, `résultat · ${call.name} · ${d ? `${d.event.entity} ${d.event.op}` : "aucun changement reconnu"} · ${e.output.slice(0, 120)}`);
+        if (d) w.writes++;
         if (d) this.onChange({ ...d.event, source: w.runner === "stub" ? "stub" : "tool" }, w, d.title, d.itemTitle, d.lines);
         break;
       }
@@ -602,7 +623,10 @@ export class Hub {
         if (w.status === "running") {
           w.status = "error";
           w.error = e.message;
-          this.announceDone(w, false);
+          if (/n'est pas connecté/.test(e.message)) {
+            this.director.note(e.message);
+            this.announce(`Mexty n'est pas connecté sur ${w.deviceName ?? "la machine"}.`);
+          } else this.announceDone(w, false);
         }
         break;
     }
@@ -612,10 +636,18 @@ export class Hub {
   // ---------- change-event bus ----------
   /** Webhook from the Mexty backend (primary source). Unknown entities are ignored: we only follow what our workers touched. */
   onMextyEvents(events: Omit<ChangeEvent, "source">[]) {
+    if (this.episode?.status !== "live") return;
     for (const ev of events) {
       const t = this.targets.get(`${ev.entity}:${ev.entityId}`);
-      if (!t || this.episode?.status !== "live") continue;
-      this.onChange({ ...ev, source: "mexty", ts: ev.ts || Date.now() }, this.workers.find((w) => w.id === t.workerId)!);
+      // The webhook only carries the Ride Studio account's own writes: during an episode, a write to a content
+      // no tile follows yet comes from a running worker even when its tool call was not recognised.
+      const w = t ? this.workers.find((x) => x.id === t.workerId) : [...this.workers].filter((x) => x.status === "running").sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0))[0];
+      if (!w) continue;
+      if (!t) {
+        this.note(w, `Mexty · ${ev.entity} ${ev.op} (${ev.tool ?? "?"})`);
+        w.writes++;
+      }
+      this.onChange({ ...ev, source: "mexty", ts: ev.ts || Date.now() }, w);
     }
   }
 
@@ -723,6 +755,12 @@ export class Hub {
     if (!ok) return this.announce(mine.length ? `${this.nameOf(mine.at(-1)!)} bloqué${this.feminine(mine.at(-1)!) ? "e" : ""}.` : "Demande bloquée.");
     // Containers a course task only touched in passing (its own blocks) are not announced one by one.
     const main = mine.filter((t) => t.entity !== "block" || mine.every((x) => x.entity === "block"));
+    if (!w.writes) {
+      // The run ended without writing anything to Mexty: never call that "done".
+      const why = w.log.filter((l) => /^(texte|erreur|fin) ·/.test(l.line)).slice(-3).map((l) => l.line).join(" / ");
+      this.director.note(`La dernière demande s'est terminée sans rien créer dans Mexty. Détail : ${why.slice(0, 400)}`);
+      return this.announce("Rien n'a été créé.");
+    }
     if (!main.length) return this.announce("C'est fait.");
     for (const t of main) {
       t.done = true;

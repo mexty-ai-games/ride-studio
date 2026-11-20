@@ -42,3 +42,22 @@ test("viewer urls open live mode", () => {
   assert.equal(viewerUrl("https://w", "course", "c1"), "https://w/lms/courses/c1/slideshow?live=1&embedded=1");
   assert.equal(viewerUrl("https://w", "program", "p1"), "https://w/lms/programs?program=p1&live=1");
 });
+
+import { serverAllowed, serverOf } from "../../shared/protocol.js";
+
+test("MCP servers are matched by name, whatever the prefix Claude Code gives them", () => {
+  const allowed = ["mcp__MEXTY", "mcp__EDVERSE"];
+  for (const s of ["MEXTY", "mexty", "claude_ai_MEXTY", "claude.ai Mexty", "EdVerse"]) assert.ok(serverAllowed(s, allowed), s);
+  for (const s of ["github", "Gmail", "filesystem"]) assert.equal(serverAllowed(s, allowed), false, s);
+  assert.equal(serverOf("mcp__claude_ai_MEXTY__add_slide"), "claude_ai_MEXTY");
+  assert.equal(serverOf("mcp__MEXTY__save_block_props"), "MEXTY");
+  assert.equal(serverOf("Bash"), null);
+});
+test("changes are recognised with a prefixed server name and an empty error field", () => {
+  const d = deriveChange("mcp__claude_ai_EdVerse__edit_scene", { scene_id: "66f0aa11bb22cc33dd44ee99", ops: [{ op: "create" }] }, '{"version":3,"error":null,"applied":1}');
+  assert.equal(d?.event.entity, "scene");
+  assert.equal(d?.event.entityId, "66f0aa11bb22cc33dd44ee99");
+  const e = deriveChange("mcp__MEXTY__add_slide", { courseId: "66f0aa11bb22cc33dd44ee55" }, 'Slide added.\n{"success":true,"slide":{"id":"slide-abcdef"}}');
+  assert.equal(e?.event.path.slideId, "slide-abcdef");
+  assert.equal(deriveChange("mcp__MEXTY__add_slide", { courseId: "66f0aa11bb22cc33dd44ee55" }, '{"error":"Course not found"}'), null);
+});

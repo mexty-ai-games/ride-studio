@@ -124,6 +124,7 @@ app.put("/api/secrets/:name", requireAuth, (req, res) => {
   hub.pushState();
   res.json(settingsView());
 });
+app.get("/api/journal", requireAuth, (_req, res) => void res.json({ workers: hub.journal() }));
 app.get("/api/voices", requireAuth, async (_req, res) => {
   const key = store.secret("elevenlabs");
   if (!key) return void res.json({ voices: [] });

@@ -17,7 +17,7 @@ interface View {
   mextyLink: { secretSet: boolean; webhookUrl: string };
   publicUrl: string;
 }
-const TABS = ["Appareils", "Claude Code", "Voix", "Clés API", "Budget"] as const;
+const TABS = ["Appareils", "Claude Code", "Voix", "Clés API", "Budget", "Journal"] as const;
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -46,6 +46,14 @@ export function Settings() {
   const [pair, setPair] = useState<{ code: string; expiresAt: number; server: string } | null>(null);
   const [voices, setVoices] = useState<{ id: string; name: string; languages: string[] }[]>([]);
   const [keyDraft, setKeyDraft] = useState<Record<string, string>>({});
+  const [journal, setJournal] = useState<{ no: number; runner: string; device: string; status: string; brief: string; error: string; log: { ts: number; line: string }[] }[]>([]);
+  useEffect(() => {
+    if (tab !== "Journal") return;
+    const get = () => void api<{ workers: typeof journal }>("/api/journal").then((j) => setJournal(j.workers)).catch(() => {});
+    get();
+    const t = setInterval(get, 3000);
+    return () => clearInterval(t);
+  }, [tab]);
 
   const load = () => api<View>("/api/settings").then(setV).catch((e) => useApp.getState().error(e.message));
   useEffect(() => {
@@ -162,6 +170,28 @@ export function Settings() {
                 <input className="field" type="password" autoComplete="off" placeholder={v.secrets[k]?.set ? "Remplacer la clé" : "Coller la clé"} value={keyDraft[k] ?? ""} onChange={(e) => setKeyDraft({ ...keyDraft, [k]: e.target.value })} aria-label={`Clé ${name}`} />
                 <button disabled={!keyDraft[k]} onClick={() => void api<View>(`/api/secrets/${k}`, { method: "PUT", json: { value: keyDraft[k] } }).then((x) => { setV(x); setKeyDraft({ ...keyDraft, [k]: "" }); })} className="mx-grad h-11 shrink-0 rounded-full border-0 px-4 text-sm font-bold text-white">Enregistrer</button>
                 {v.secrets[k]?.set && <button onClick={() => confirm(`Supprimer la clé ${name} ?`) && void api<View>(`/api/secrets/${k}`, { method: "PUT", json: { value: "" } }).then(setV)} className="h-11 shrink-0 rounded-full border border-line bg-field px-3 text-xs font-semibold text-text">Supprimer</button>}
+              </div>
+            ))}
+          </>
+        )}
+
+        {tab === "Journal" && (
+          <>
+            <h2 className="m-0 mb-1 font-display text-xl font-extrabold">Journal de l'épisode</h2>
+            <p className="m-0 mb-2 text-xs text-muted">Ce que chaque demande a fait : serveurs MCP vus au départ, outils appelés, changements reconnus, erreurs.</p>
+            {journal.length === 0 && <p className="text-sm text-muted">Aucune demande dans l'épisode en cours.</p>}
+            {[...journal].reverse().map((w) => (
+              <div key={w.no} className="mb-3 rounded-2xl bg-field p-3">
+                <div className="text-sm font-bold">Demande {w.no} · {w.runner === "device" ? w.device : w.runner} · {w.status}</div>
+                <div className="mb-1.5 text-xs text-muted">{w.brief}</div>
+                {w.error && <div className="mb-1.5 text-xs font-semibold text-bad">{w.error}</div>}
+                <div className="flex flex-col gap-0.5 font-mono text-[11px] leading-snug">
+                  {w.log.map((l, i) => (
+                    <div key={i} style={{ color: /^erreur|refusé|aucun changement|=failed|=needs-auth/.test(l.line) ? "var(--bad)" : /^résultat · .* (course|program|evaluation|block|scene) /.test(l.line) ? "var(--ok)" : undefined }}>
+                      {new Date(l.ts).toLocaleTimeString("fr-FR")} {l.line}
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </>

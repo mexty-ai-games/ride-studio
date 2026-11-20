@@ -202,6 +202,24 @@ export type DeviceToServer =
 /** `taskId: "*"` stops every task on the device. */
 export type ServerToDevice = TaskRun | { t: "task.stop"; taskId: string } | { t: "welcome"; deviceId: string; name: string };
 
+/** Letters and digits only, lowercase: "claude.ai MEXTY" → "claudeaimexty". */
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+/** "mcp__MEXTY" → "mexty". */
+const allowedKey = (p: string) => squash(p.replace(/^mcp__/i, ""));
+/**
+ * Is this MCP server one of the allowed ones? Names vary with how the server was added to Claude Code
+ * ("MEXTY", "mexty", "claude.ai MEXTY", …), so the allowed name only has to appear in it.
+ */
+export function serverAllowed(server: string, allowedTools: string[]): boolean {
+  const s = squash(server);
+  return allowedTools.some((p) => s.includes(allowedKey(p)));
+}
+/** "mcp__claude_ai_MEXTY__add_slide" → "claude_ai_MEXTY" (null for a built-in tool). */
+export function serverOf(tool: string): string | null {
+  const m = /^mcp__(.+?)__[^_].*$/.exec(tool);
+  return m ? m[1] : null;
+}
+
 /** MCP tool name → bare tool ("mcp__MEXTY__add_slide" → "add_slide"). */
 export function bareTool(name: string): string {
   const m = /^mcp__[^_]+(?:_[^_]+)*__(.+)$/.exec(name);

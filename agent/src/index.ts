@@ -5,7 +5,7 @@ import { homedir, hostname, platform } from "node:os";
 import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import WebSocket from "ws";
-import type { DeviceToServer, ServerToDevice, TaskEvent, TaskRun } from "../../shared/protocol.js";
+import { serverAllowed, serverOf, type DeviceToServer, type ServerToDevice, type TaskEvent, type TaskRun } from "../../shared/protocol.js";
 
 const VERSION = "0.1.0";
 const dir = join(homedir(), ".ride-agent");
@@ -68,9 +68,11 @@ const price = (model: string) => PRICE[Object.keys(PRICE).find((k) => model.incl
 
 function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortController {
   const abort = new AbortController();
-  const allowed = task.allowedTools.map((t) => t.toLowerCase());
-  // Least privilege: no built-in tools at all, and only MCP tools of the allowed servers.
-  const permitted = (tool: string) => allowed.some((p) => tool.toLowerCase() === p || tool.toLowerCase().startsWith(p + "__"));
+  // Least privilege: no built-in tools at all, and only MCP tools of the allowed servers (MEXTY, EDVERSE).
+  const permitted = (tool: string) => {
+    const server = serverOf(tool);
+    return !!server && serverAllowed(server, task.allowedTools);
+  };
   let estimate = 0;
   let sessionId: string | undefined;
   const names = new Map<string, string>();
@@ -85,7 +87,11 @@ function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortCo
         abortController: abort,
         tools: [],
         permissionMode: "default",
-        canUseTool: async (toolName, input) => (permitted(toolName) ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "Ride Studio workers may only use the MEXTY and EDVERSE tools." }),
+        canUseTool: async (toolName, input) => {
+          if (permitted(toolName)) return { behavior: "allow", updatedInput: input };
+          emit({ kind: "text", text: `Outil refusé : ${toolName}` });
+          return { behavior: "deny", message: "Ride Studio workers may only use the MEXTY and EDVERSE tools." };
+        },
         systemPrompt: { type: "preset", preset: "claude_code", append: task.systemAppend },
       },
     });
@@ -95,8 +101,14 @@ function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortCo
         cfg.mcpServers = m.mcp_servers.map((s) => ({ name: s.name, status: s.status }));
         save(cfg);
         emit({ kind: "init", sessionId: m.session_id, mcpServers: cfg.mcpServers, model: m.model });
-        const missing = allowed.filter((p) => p.startsWith("mcp__") && !cfg.mcpServers!.some((s) => `mcp__${s.name}`.toLowerCase() === p && s.status === "connected"));
-        if (missing.length) emit({ kind: "text", text: `Serveurs MCP non connectés sur cet appareil : ${missing.join(", ")}` });
+        const usable = m.mcp_servers.filter((s) => s.status === "connected" && serverAllowed(s.name, task.allowedTools));
+        if (!usable.length) {
+          // Without them the model can only answer in words: stop now and say why, instead of "done".
+          const seen = m.mcp_servers.map((s) => `${s.name} (${s.status})`).join(", ") || "aucun";
+          emit({ kind: "error", message: `Mexty n'est pas connecté dans Claude Code sur cet appareil. Serveurs MCP vus : ${seen}.` });
+          abort.abort();
+          return;
+        }
       } else if (m.type === "assistant") {
         const u = m.message.usage;
         const [pi, po, pc] = price(task.model);

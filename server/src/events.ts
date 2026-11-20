@@ -33,9 +33,17 @@ const READ_ONLY = /^(get|list|read|search|find|preview|check|compare|screenshot|
 
 export function parseJsonLoose(text: string): unknown {
   const t = text.trim();
-  if (!t || (t[0] !== "{" && t[0] !== "[")) return null;
+  if (!t) return null;
   try {
-    return JSON.parse(t);
+    if (t[0] === "{" || t[0] === "[") return JSON.parse(t);
+  } catch {
+    /* fall through: a JSON object inside some text */
+  }
+  const a = t.indexOf("{");
+  const b = t.lastIndexOf("}");
+  if (a < 0 || b <= a) return null;
+  try {
+    return JSON.parse(t.slice(a, b + 1));
   } catch {
     return null;
   }
@@ -77,7 +85,7 @@ export function deriveChange(toolName: string, input: unknown, resultText: strin
   if (!family) return null;
   const entity = family[1];
   const result = parseJsonLoose(resultText);
-  if (result && typeof result === "object" && ((result as { success?: unknown }).success === false || "error" in (result as object))) return null;
+  if (result && typeof result === "object" && ((result as { success?: unknown }).success === false || !!(result as { error?: unknown }).error)) return null;
 
   let entityId = "";
   const path: ChangeEvent["path"] = {};
