@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import { Director } from "./director.js";
 import { deriveChange, ENTITY_LABEL, openUrl, viewerUrl } from "./events.js";
 import { LANDSCAPE, PORTRAIT, PreviewRenderer } from "./preview/renderer.js";
+import { radio, view as radioView } from "./radio.js";
 import { store } from "./store.js";
 import { STT_PRICE_PER_MIN, STT_VENDORS, type SttVendor } from "./stt/index.js";
 import { streamTts, TTS_PRICE_PER_CHAR } from "./tts.js";
@@ -106,6 +107,7 @@ export class Hub {
         return `${c.name} à l'écran.`;
       },
       showQr: (on) => this.setQr(on),
+      radio: (action) => this.setRadio(action, true),
       stopAll: () => (setTimeout(() => this.stopAll(), 0), "Tout est arrêté. Ne dis rien : le studio l'annonce."),
       dispatch: (brief, target) => this.dispatch(brief, target),
       status: () => this.statusText(),
@@ -208,7 +210,67 @@ export class Hub {
       camera: this.camera,
       show: this.show,
       contents: this.contents(),
+      radio: this.radioState(),
     };
+  }
+
+  // ---------- Radio Monkey ----------
+  private radioOn = false;
+  private radioTrackId: string | null = null;
+  private radioStartedAt = 0;
+
+  radioState(): StudioState["radio"] {
+    const t = this.radioTrackId ? radio.find(this.radioTrackId) : null;
+    return { on: this.radioOn && !!t, track: t ? radioView(t) : null, startedAt: this.radioStartedAt, library: radio.tracks.filter((x) => x.enabled).length };
+  }
+
+  private playNext(): boolean {
+    const t = radio.pick(this.radioTrackId ?? undefined);
+    if (!t) return false;
+    this.radioTrackId = t.id;
+    this.radioStartedAt = Date.now();
+    radio.aired(t);
+    return true;
+  }
+
+  /**
+   * On, off or next track. Only Fabien decides: the phone buttons and the director's radio tool (whose
+   * description restricts it to his explicit request) are the only callers, plus the end of the episode.
+   */
+  setRadio(action: "on" | "off" | "next", spoken = false): string {
+    if (action === "off") {
+      if (!this.radioOn) return "La radio est déjà coupée.";
+      this.radioOn = false;
+      this.pushState();
+      if (spoken) this.announce("Radio coupée.");
+      return "OK.";
+    }
+    if (action === "on" && this.radioOn) return "La radio tourne déjà.";
+    if (!this.playNext()) {
+      this.radioOn = false;
+      this.pushState();
+      if (spoken) this.announce("La radio est vide.");
+      return "Erreur : aucun morceau dans Radio Monkey.";
+    }
+    this.radioOn = true;
+    this.pushState();
+    const t = this.radioState().track!;
+    if (spoken) this.announce(action === "on" ? "Radio Monkey." : `${t.title}.`);
+    return "OK.";
+  }
+
+  /** The phone finished the track on air: the next one follows. Ignored if it is about an older track. */
+  radioEnded(trackId: string) {
+    if (!this.radioOn || trackId !== this.radioTrackId) return;
+    if (!this.playNext()) this.radioOn = false;
+    this.pushState();
+  }
+
+  /** A track was removed or disabled while on air. */
+  radioLibraryChanged() {
+    const t = this.radioTrackId ? radio.find(this.radioTrackId) : null;
+    if (this.radioOn && (!t || !t.enabled)) this.radioEnded(this.radioTrackId!);
+    this.pushState();
   }
 
   // ---------- arrival, recording, showing ----------
@@ -395,6 +457,7 @@ export class Hub {
     ep.delivered = this.contents().map((c) => ({ entity: c.entity, entityId: c.key.split(":")[1], title: c.title || c.name, url: c.url || undefined }));
     store.addEpisode({ id: ep.id, no: ep.no, company: ep.setup.company, topic: ep.setup.topic, destination: ep.setup.destination, etaMin: ep.setup.etaMin, beats: ep.beats, startedAt: ep.startedAt, endedAt: ep.endedAt, cost: { director: this.cost.director, voice: this.cost.voice, workers: this.cost.workers, total: this.cost.total }, stats: ep.stats, delivered: ep.delivered });
     this.stopSpeaking();
+    this.radioOn = false;
     this.pushState();
     // Keep the last frames visible for the outro, then free Chromium.
     setTimeout(() => this.episode === ep && void this.previews.closeAll(), 60_000).unref();

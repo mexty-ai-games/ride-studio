@@ -28,6 +28,7 @@ export interface DirectorActions {
   setLayout(mode: LayoutMode): string;
   focusTile(n: number | null): string;
   markBeat(label: string): string;
+  radio(action: "on" | "off" | "next"): string;
 }
 
 const TOOLS: Anthropic.Tool[] = [
@@ -43,6 +44,12 @@ const TOOLS: Anthropic.Tool[] = [
   { name: "switch_camera", description: "Bascule entre la caméra avant (Fabien) et la caméra arrière (filmer une autre personne).", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "show_content", description: "Affiche un contenu en grand, à tout moment, terminé ou en cours. En route : il passe en plein écran dans la vidéo. Une fois arrivés : il s'ouvre aussi sur le téléphone pour qu'une personne le teste. C'est l'outil pour toute demande d'ouvrir, afficher, montrer, voir, aller sur un contenu (« ouvre le parcours », « montre le premier cours », « mets le cours en plein écran », « va sur la page du learning path »). name = le nom annoncé (« Cours 1 », « Programme d'étude », « Scène 3D 1 »), le type (« le parcours », « le cours ») ou vide pour le dernier. close=true pour revenir à tous les écrans.", input_schema: { type: "object", properties: { name: { type: "string" }, close: { type: "boolean" } }, additionalProperties: false } },
   { name: "show_qr", description: "Affiche (on=true) ou masque (on=false) le QR code du contenu montré, pour qu'une personne l'ouvre sur son propre téléphone.", input_schema: { type: "object", properties: { on: { type: "boolean" } }, required: ["on"], additionalProperties: false } },
+  {
+    name: "radio",
+    description:
+      "Radio Monkey, la musique de fond. UNIQUEMENT quand Fabien le demande explicitement en parlant de la radio ou de la musique : « mets la radio », « lance la musique » (on), « coupe la radio », « coupe la musique » (off), « morceau suivant », « change de musique » (next). Ne l'allume, ne la coupe et ne change jamais de morceau de toi-même : ni pour un événement, ni pour une pause, ni à l'arrivée, ni sur un simple « stop ».",
+    input_schema: { type: "object", properties: { action: { type: "string", enum: ["on", "off", "next"] } }, required: ["action"], additionalProperties: false },
+  },
   { name: "end_episode", description: "Termine définitivement l'épisode et l'enregistrement. Seulement si Fabien dit clairement que l'épisode est fini (« on termine l'épisode », « c'est fini pour aujourd'hui ») : pour « on est arrivés », utilise arrive.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   {
     name: "dispatch_task",
@@ -68,7 +75,8 @@ Ta voix est entendue dans la vidéo. Règles :
 - Dès que Fabien donne l'entreprise, la destination, la durée du trajet ou le sujet, appelle set_episode.
 - Tu ne cliques pas dans les pages et tu n'ouvres pas d'adresse : tu affiches des contenus. Pour toute demande d'ouvrir, montrer, afficher, voir, aller sur un contenu ou une page (même formulée comme une adresse, « /lms/... », ou comme un clic), appelle show_content avec le contenu visé. Le premier cours d'un parcours est le contenu « Cours 1 ». Ne réponds jamais « je ne peux pas » sans avoir d'abord appelé show_content.
 - Il peut y avoir plusieurs écrans à l'image. Ne dis jamais combien il y en a sans l'avoir vérifié dans les événements ou avec get_status. Si focus_tile échoue, appelle get_status et réessaie avec le bon numéro.
-- Les outils arrive, pause_recording, resume_recording, show_content, show_qr et switch_camera annoncent eux-mêmes ce qu'ils font : après eux, réponds exactement « … ».
+- La radio (outil radio) ne bouge que sur un ordre explicite de Fabien qui parle de radio ou de musique. « Stop » seul, c'est stop_all, pas la radio.
+- Les outils arrive, pause_recording, resume_recording, show_content, show_qr, switch_camera et radio annoncent eux-mêmes ce qu'ils font : après eux, réponds exactement « … ».
 - N'annonce jamais toi-même qu'un contenu est terminé : le studio le dit à ta place (« Cours 1 terminé. »). Ne prétends jamais qu'un contenu existe.
 - Les messages entre crochets [événements] viennent du studio, pas de Fabien. Réponds exactement « … », sauf s'ils te demandent explicitement de prévenir Fabien : alors une phrase très courte.`;
 
@@ -258,6 +266,8 @@ export class Director {
           return this.actions.setLayout((["auto", "single", "split", "grid"].includes(String(a.mode)) ? a.mode : "auto") as LayoutMode);
         case "focus_tile":
           return this.actions.focusTile(Number(a.n) > 0 ? Number(a.n) : null);
+        case "radio":
+          return this.actions.radio(a.action === "off" ? "off" : a.action === "next" ? "next" : "on");
         case "mark_beat":
           return this.actions.markBeat(String(a.label ?? "moment"));
         default:
@@ -272,7 +282,8 @@ export class Director {
   private stubTurn(text: string) {
     if (text.startsWith("[événements]")) return;
     const t = text.toLowerCase();
-    if (/^(stop|arrête)\b|arrête tout/.test(t)) this.actions.stopAll();
+    if (/\b(radio|musique)\b/.test(t)) this.actions.radio(/coupe|arrête|éteins|stop/.test(t) ? "off" : /suivant|change|autre/.test(t) ? "next" : "on");
+    else if (/^(stop|arrête)\b|arrête tout/.test(t)) this.actions.stopAll();
     else if (/termine l'épisode|fin de l'épisode|c'est fini pour aujourd'hui/.test(t)) {
       this.actions.endEpisode();
       this.speak("Épisode terminé.");

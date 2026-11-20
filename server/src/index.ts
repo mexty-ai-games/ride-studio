@@ -9,6 +9,7 @@ import { BIN_MIC, MIC_RATE, type ChangeEvent, type PhoneToServer, type ServerToP
 import { clearSession, isAuthed, issueSession, limited, requireAuth, safeEqual } from "./auth.js";
 import { config } from "./config.js";
 import { Hub } from "./hub.js";
+import { radio, radioRouter } from "./radio.js";
 import { deleteVideos, diskUsage, recordingsBytes, recordingsRouter, videosOf } from "./recordings.js";
 import { SECRET_NAMES, store, type SecretName } from "./store.js";
 import { openStt, STT_VENDORS, type SttSession, type SttVendor } from "./stt/index.js";
@@ -40,6 +41,9 @@ app.post("/api/mexty/events", express.raw({ type: "*/*", limit: "256kb" }), (req
     res.status(400).json({ error: "bad json" });
   }
 });
+
+// ---- Radio Monkey (before the JSON parser: uploads are raw audio) ----
+app.use("/api", radioRouter(() => hub.radioLibraryChanged(), () => hub.radioState()));
 
 app.use(express.json({ limit: "64kb" }));
 app.get("/api/health", (_req, res) => void res.json({ ok: true }));
@@ -318,6 +322,12 @@ function phoneSocket(ws: WebSocket) {
         return void hub.showContent(typeof m.key === "string" ? m.key : null);
       case "qr":
         return void hub.setQr(!!m.on);
+      case "radio":
+        return void hub.setRadio(m.action === "off" ? "off" : m.action === "next" ? "next" : "on");
+      case "radio.ended":
+        return typeof m.trackId === "string" ? hub.radioEnded(m.trackId) : undefined;
+      case "radio.meta":
+        return typeof m.trackId === "string" ? radio.setDuration(m.trackId, Number(m.durationSec)) : undefined;
       case "text":
         if (typeof m.text === "string" && m.text.trim()) hub.userTurn(m.text.trim().slice(0, 600));
         return;

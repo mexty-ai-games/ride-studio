@@ -29,6 +29,15 @@ shared/   Wire protocol (phone ↔ server ↔ device)
 
 The phone records into its own browser storage first, so a dropped connection never costs footage. When the episode ends, the chunks are sent in order to the server and stored on the volume under `recordings/<episodeId>/`. The upload resumes on its own after a dropped connection or a closed tab. The Épisodes screen lists every past episode with its videos, playable and downloadable from any device; it also shows the space used and lets you delete videos. A 25-minute ride is roughly 1.1 GB in 9:16 plus 0.9 GB in 16:9, so size the volume accordingly.
 
+## Radio Monkey
+
+Music under the episode. The library lives on the volume under `radio/` (Réglages → Radio Monkey: send audio files from the phone or computer, several at once, or add a Suno or any https audio link; switch tracks in or out of the playlist). Only this password-protected app can add music: fabien.ninja is public and read-only.
+
+- **On, off, next only when Fabien asks**: the director's `radio` tool is limited to explicit requests ("mets la radio", "coupe la radio", "morceau suivant"); a plain "stop" is still the emergency stop and leaves the music alone. The Live screen has the same buttons. The radio stops with the episode.
+- **Ducking**: the music drops (0.3 → 0.06) as soon as a line is announced, while Claude's voice plays, and during the progress notes, then comes back over 0.6 s. It goes to the headset and into the recording.
+- **Public**: `GET /api/public/radio` (CORS open) lists what is on air and every track that has been broadcast; only those files are public (`/api/radio/file/<id>.<ext>`). fabien.ninja reads it.
+- **Routine (later)**: `POST /api/radio/tracks/url` with `{ url, title, artist, cover, prompt }` and `Authorization: Bearer $RADIO_TOKEN` adds a track without a session, e.g. from a Suno generation.
+
 ## Run it locally
 
 ```bash
@@ -52,6 +61,7 @@ The `Dockerfile` builds everything on Playwright's image (Chromium included). Mo
 | `SETTINGS_KEY` | Encrypts the API keys saved from Settings |
 | `RIDE_STUDIO_SECRET` | Shared with the Mexty backend (webhook signature, preview session) |
 | `DATA_DIR` | `/data` |
+| `RADIO_TOKEN` | Optional: lets a routine add Radio Monkey tracks |
 
 Anthropic and ElevenLabs keys (and optionally Deepgram, OpenAI) are entered in Settings → Clés API.
 

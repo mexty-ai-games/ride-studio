@@ -46,6 +46,8 @@ export const config = {
   publicUrl: (process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "")).replace(/\/$/, ""),
   phoneDist: findUp("phone/dist"),
   skillPath: findUp("skill/ride-studio-atomic-writes/SKILL.md"),
+  /** Lets a routine add Radio Monkey tracks with `Authorization: Bearer <token>` (optional). */
+  radioToken: process.env.RADIO_TOKEN || "",
   /** Set to 0 to skip launching Chromium (previews then fall back to nothing). */
   previews: process.env.PREVIEWS !== "0",
 };
