@@ -26,7 +26,7 @@ interface AppState {
   recording: boolean;
   recStartedAt: number;
   /** A content the rider opened on the phone by tapping its screen (any time, not only once arrived). */
-  opened: string | null;
+  opened: { key: string; mode: "edit" | "final" } | null;
   uploads: Record<string, { sent: number; total: number; done: boolean; error?: string }>;
   set: (p: Partial<AppState>) => void;
   error: (m: string) => void;

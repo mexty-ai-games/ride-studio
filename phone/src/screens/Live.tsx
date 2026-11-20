@@ -3,6 +3,7 @@ import { audio } from "../audio";
 import { link } from "../link";
 import { fmtClock, fmtUsd, useApp } from "../store";
 import { studio } from "../studio";
+import { CostDetail, costSummary } from "./CostDetail";
 import { ShowOverlay } from "./ShowOverlay";
 
 /** Shows a compositor canvas inside the page by re-parenting the real element (what you see is what is recorded). */
@@ -67,6 +68,13 @@ export function Live() {
   const [text, setText] = useState("");
   const [confirmEnd, setConfirmEnd] = useState(false);
   const opened = useApp((x) => x.opened);
+  const [choice, setChoice] = useState<string | null>(null);
+  const [costOpen, setCostOpen] = useState(false);
+  const open = (key: string, mode: "edit" | "final") => {
+    setChoice(null);
+    useApp.getState().set({ opened: { key, mode } });
+    link.send({ t: "show", key });
+  };
   const ep = s?.episode;
   const needsTap = !audio.media; // the page was reloaded mid-ride
 
@@ -93,8 +101,8 @@ export function Live() {
             const slot = studio.comp.hitTile(studio.wide.canvas.width, x, y);
             const c = slot == null ? undefined : s.contents.find((x) => x.slot === slot);
             if (!c) return;
-            useApp.getState().set({ opened: c.key });
-            link.send({ t: "show", key: c.key });
+            // Ask first: the editor (the work in progress) or the final version.
+            setChoice(c.key);
           }}
         />
         {needsTap && (
@@ -141,13 +149,16 @@ export function Live() {
         </div>
 
         <div className="card flex flex-col gap-1.5 rounded-[18px] px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
+          <button onClick={() => setCostOpen(true)} aria-label="Détail du coût" className="flex flex-col gap-1 border-0 bg-transparent p-0 text-left text-text">
+          <div className="flex w-full items-center justify-between gap-2">
             <span className="truncate text-xs font-bold">{head}</span>
             <span className="shrink-0 text-xs font-semibold" style={{ color: s.cost.capped ? "var(--bad)" : s.cost.warned ? "var(--warn)" : "var(--muted)" }}>{fmtUsd(s.cost.total)} / {s.cost.cap} $</span>
           </div>
-          <div role="progressbar" aria-label="Dépense" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} className="h-1.5 overflow-hidden rounded-full bg-track">
+          <div role="progressbar" aria-label="Dépense" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} className="h-1.5 w-full overflow-hidden rounded-full bg-track">
             <div className="mx-grad h-1.5 rounded-full" style={{ width: `${pct}%` }} />
           </div>
+          {costSummary(s.cost) && <span className="w-full truncate text-[11px] font-semibold text-muted">{costSummary(s.cost)}</span>}
+          </button>
           {arrived && s.contents.length > 0 ? (
             <div className="flex flex-col gap-1">
               {s.contents.map((c) => (
@@ -203,8 +214,27 @@ export function Live() {
           )}
         </div>
       </div>
-      {opened && s.contents.some((c) => c.key === opened) ? (
-        <ShowOverlay s={s} contentKey={opened} />
+      {costOpen && <CostDetail c={s.cost} onClose={() => setCostOpen(false)} />}
+      {choice && (() => {
+        const c = s.contents.find((x) => x.key === choice);
+        if (!c) return null;
+        const editor = c.entity === "scene" || /edverse/.test(c.editUrl) ? "Éditeur 3D" : c.entity === "block" ? "Éditeur de bloc" : "Éditeur";
+        return (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4" onClick={() => setChoice(null)}>
+            <div className="card flex w-full max-w-xl flex-col gap-3 rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
+              <div className="font-display text-xl font-extrabold">{c.name}{c.title ? ` · ${c.title}` : ""}</div>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => open(c.key, "edit")} disabled={!c.editUrl} className="h-28 rounded-2xl border-2 border-[#7B3FE4] bg-chip-on font-display text-2xl font-extrabold text-text">{editor}</button>
+                <button onClick={() => open(c.key, "final")} disabled={!c.url} className="mx-grad h-28 rounded-2xl border-0 font-display text-2xl font-extrabold text-white">Version finale</button>
+              </div>
+              {!c.url && <p className="m-0 text-xs text-muted">Contenu de démonstration : rien à ouvrir dans Mexty.</p>}
+              <button onClick={() => setChoice(null)} className="h-10 self-end rounded-full border border-line bg-field px-4 text-sm font-semibold text-text">Annuler</button>
+            </div>
+          </div>
+        );
+      })()}
+      {opened && s.contents.some((c) => c.key === opened.key) ? (
+        <ShowOverlay s={s} contentKey={opened.key} mode={opened.mode} />
       ) : (
         s.show.key && arrived && <ShowOverlay s={s} contentKey={s.show.key} />
       )}

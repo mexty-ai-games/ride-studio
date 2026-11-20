@@ -53,6 +53,8 @@ export interface ContentLink {
   entity: Entity;
   title: string;
   url: string;
+  /** The same content in Mexty's editor (legacy block editor, EdVerse 3D editor, course slides…). */
+  editUrl: string;
   slot: number | null;
   done: boolean;
 }
@@ -71,14 +73,38 @@ export interface WorkerState {
   error?: string;
 }
 
+/** One window of the Claude plan's usage limit, in percent; `start` is the reading at the start of the episode. */
+export interface PlanWindow {
+  pct: number;
+  start: number;
+  resetsAt: string | null;
+}
+export interface PlanUsage {
+  /** "pro", "max", "team"… */
+  subscription: string | null;
+  fiveHour: PlanWindow | null;
+  sevenDay: PlanWindow | null;
+  ts: number;
+}
+
+/** Spend of the episode, in USD, by who bills it. */
 export interface CostState {
+  /** The voice (orchestrator): Claude API, billed to the Anthropic key. */
   director: number;
-  voice: number;
-  workers: number;
+  /** Claude's voice and the Scribe transcription. */
+  elevenlabs: number;
+  /** Deepgram or OpenAI transcription. */
+  otherApis: number;
+  /** Workers on Claude Managed Agents, billed to the Anthropic key. */
+  cloud: number;
+  /** Workers on the rider's machines run on the Claude plan: what they would cost on the API, not billed. */
+  planEquivalent: number;
+  /** Money actually spent: director + elevenlabs + otherApis + cloud. The cap applies to this. */
   total: number;
   cap: number;
   warned: boolean;
   capped: boolean;
+  plan: PlanUsage | null;
 }
 
 export interface EpisodeState {
@@ -216,6 +242,8 @@ export type TaskEvent =
   | { kind: "tool_use"; id: string; name: string; input: unknown }
   | { kind: "tool_result"; id: string; name?: string; isError: boolean; output: string }
   | { kind: "usage"; costUsd: number }
+  /** Claude plan usage limits, read on the machine (Claude Code's /usage). */
+  | { kind: "plan"; subscription: string | null; fiveHour: { pct: number; resetsAt: string | null } | null; sevenDay: { pct: number; resetsAt: string | null } | null }
   | { kind: "result"; ok: boolean; sessionId?: string; costUsd: number; turns: number; summary: string }
   | { kind: "error"; message: string };
 

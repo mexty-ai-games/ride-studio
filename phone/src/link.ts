@@ -74,7 +74,7 @@ class Link {
         if (ep?.status === "ended" && prev?.status === "live") screen = "arrival";
         // An overlay the rider opened follows what the voice shows next ("ferme" closes it).
         const was = app.studio?.show.key ?? null;
-        const opened = app.opened && m.state.show.key !== was ? m.state.show.key : app.opened;
+        const opened = app.opened && m.state.show.key !== was ? (m.state.show.key ? { key: m.state.show.key, mode: app.opened.mode } : null) : app.opened;
         app.set({ studio: m.state, screen, opened });
         break;
       }

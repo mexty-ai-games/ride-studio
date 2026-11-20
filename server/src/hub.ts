@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { WebSocket } from "ws";
-import { BIN_FRAME, BIN_TTS, type ChangeEvent, type ContentLink, type CostState, type Entity, type EpisodeSetup, type EpisodeState, type LayoutMode, type Readiness, type ServerToPhone, type StudioState, type TaskEvent, type TileState, type WorkerState } from "../../shared/protocol.js";
+import { BIN_FRAME, BIN_TTS, type ChangeEvent, type ContentLink, type PlanWindow, type CostState, type Entity, type EpisodeSetup, type EpisodeState, type LayoutMode, type Readiness, type ServerToPhone, type StudioState, type TaskEvent, type TileState, type WorkerState } from "../../shared/protocol.js";
 import { config } from "./config.js";
 import { Director } from "./director.js";
-import { deriveChange, ENTITY_LABEL, openUrl, viewerUrl } from "./events.js";
+import { deriveChange, editorUrl, ENTITY_LABEL, openUrl, viewerUrl } from "./events.js";
 import { LANDSCAPE, PORTRAIT, PreviewRenderer } from "./preview/renderer.js";
 import { radio, view as radioView } from "./radio.js";
 import { store } from "./store.js";
@@ -60,7 +60,7 @@ export class Hub {
   private targets = new Map<string, Target>();
   private layout: LayoutMode = "auto";
   private focus: number | null = null;
-  private cost: CostState = { director: 0, voice: 0, workers: 0, total: 0, cap: store.settings.budget.capUsd, warned: false, capped: false };
+  private cost: CostState = { director: 0, elevenlabs: 0, otherApis: 0, cloud: 0, planEquivalent: 0, total: 0, cap: store.settings.budget.capUsd, warned: false, capped: false, plan: null };
   private stateTimer: NodeJS.Timeout | null = null;
   private recent: { key: string; ts: number }[] = [];
   private mextySession: { token: string; exp: number } | null = null;
@@ -294,6 +294,7 @@ export class Hub {
         entity: t.entity,
         title: t.title,
         url: demo ? "" : openUrl(front, t.entity, t.entityId, { propsId: t.propsId, edverse: t.edverse, game: game && { blockId: game.entityId, propsId: game.propsId } }),
+        editUrl: demo ? "" : editorUrl(front, t.entity, t.entityId, { propsId: t.propsId, edverse: t.edverse }),
         slot: t.slot,
         done: !!t.done,
       });
@@ -422,7 +423,7 @@ export class Hub {
     this.rec = "on";
     this.show = { key: null, qr: false };
     const cap = Math.max(1, Number(setup.budgetCap) || store.settings.budget.capUsd);
-    this.cost = { director: 0, voice: 0, workers: 0, total: 0, cap, warned: false, capped: false };
+    this.cost = { director: 0, elevenlabs: 0, otherApis: 0, cloud: 0, planEquivalent: 0, total: 0, cap, warned: false, capped: false, plan: null };
     this.episode = {
       id: randomUUID(),
       no: ++this.episodeNo,
@@ -457,7 +458,7 @@ export class Hub {
     ep.endedAt = Date.now();
     const front = store.settings.mexty.frontUrl;
     ep.delivered = this.contents().map((c) => ({ entity: c.entity, entityId: c.key.split(":")[1], title: c.title || c.name, url: c.url || undefined }));
-    store.addEpisode({ id: ep.id, no: ep.no, company: ep.setup.company, topic: ep.setup.topic, destination: ep.setup.destination, etaMin: ep.setup.etaMin, beats: ep.beats, startedAt: ep.startedAt, endedAt: ep.endedAt, cost: { director: this.cost.director, voice: this.cost.voice, workers: this.cost.workers, total: this.cost.total }, stats: ep.stats, delivered: ep.delivered });
+    store.addEpisode({ id: ep.id, no: ep.no, company: ep.setup.company, topic: ep.setup.topic, destination: ep.setup.destination, etaMin: ep.setup.etaMin, beats: ep.beats, startedAt: ep.startedAt, endedAt: ep.endedAt, cost: { director: this.cost.director, elevenlabs: this.cost.elevenlabs, otherApis: this.cost.otherApis, cloud: this.cost.cloud, planEquivalent: this.cost.planEquivalent, total: this.cost.total, plan: this.cost.plan }, stats: ep.stats, delivered: ep.delivered });
     this.stopSpeaking();
     this.radioOn = false;
     this.pushState();
@@ -470,12 +471,13 @@ export class Hub {
   }
 
   // ---------- budget ----------
-  addCost(kind: "director" | "voice" | "workers", usd: number, absolute = false) {
+  addCost(kind: "director" | "elevenlabs" | "otherApis" | "cloud" | "planEquivalent", usd: number, absolute = false) {
     if (!Number.isFinite(usd) || usd < 0) return;
     if (absolute) this.cost[kind] = usd;
     else this.cost[kind] += usd;
     const c = this.cost;
-    c.total = c.director + c.voice + c.workers;
+    // Only money actually spent counts: machine workers run on the Claude plan.
+    c.total = c.director + c.elevenlabs + c.otherApis + c.cloud;
     if (this.episode?.status === "live") {
       if (!c.warned && c.total >= c.cap * 0.8) {
         c.warned = true;
@@ -490,7 +492,26 @@ export class Hub {
     this.pushState();
   }
   addSttSeconds(vendor: SttVendor, seconds: number) {
-    this.addCost("voice", (seconds / 60) * STT_PRICE_PER_MIN[vendor]);
+    this.addCost(vendor === "elevenlabs" ? "elevenlabs" : "otherApis", (seconds / 60) * STT_PRICE_PER_MIN[vendor]);
+  }
+  /** Worker spend by who pays it: Managed Agents on the API key, machines on the Claude plan. */
+  private workerCosts() {
+    const sum = (f: (w: Worker) => boolean) => this.workers.filter(f).reduce((a, x) => a + x.costUsd, 0);
+    this.addCost("cloud", sum((w) => w.runner === "cloud"), true);
+    this.addCost("planEquivalent", sum((w) => w.runner !== "cloud"), true);
+  }
+  /** Plan usage read on a machine: the first reading of the episode is the baseline. */
+  private planReading(e: Extract<TaskEvent, { kind: "plan" }>) {
+    const prev = this.cost.plan;
+    const win = (now: { pct: number; resetsAt: string | null } | null, before: PlanWindow | null | undefined): PlanWindow | null => {
+      if (!now) return before ?? null;
+      if (!before) return { pct: now.pct, resetsAt: now.resetsAt, start: now.pct };
+      // A new reset time means the window started over: the baseline goes back to zero.
+      const reset = !!now.resetsAt && !!before.resetsAt && now.resetsAt !== before.resetsAt;
+      return { pct: now.pct, resetsAt: now.resetsAt ?? before.resetsAt, start: reset ? 0 : before.start };
+    };
+    this.cost.plan = { subscription: e.subscription ?? prev?.subscription ?? null, fiveHour: win(e.fiveHour, prev?.fiveHour), sevenDay: win(e.sevenDay, prev?.sevenDay), ts: Date.now() };
+    this.pushState();
   }
 
   // ---------- voice out ----------
@@ -517,7 +538,7 @@ export class Hub {
         head.writeUInt32LE(id, 1);
         try {
           await streamTts(key, store.settings.voice, text, this.lastSaid, this.ttsAbort.signal, (pcm) => this.binary(Buffer.concat([head, pcm])));
-          this.addCost("voice", text.length * TTS_PRICE_PER_CHAR);
+          this.addCost("elevenlabs", text.length * TTS_PRICE_PER_CHAR);
           this.lastSaid = text;
         } catch (e) {
           if (!this.ttsAbort.signal.aborted) this.broadcast({ t: "error", message: (e as Error).message });
@@ -650,6 +671,7 @@ export class Hub {
 
   private onTaskEvent(w: Worker, e: TaskEvent) {
     w.lastEventAt = Date.now();
+    if (e.kind === "plan") return this.planReading(e);
     if (e.kind === "init") this.note(w, `début · ${e.model} · MCP : ${e.mcpServers.map((s) => `${s.name}=${s.status}`).join(", ") || "aucun"}`);
     else if (e.kind === "text") this.note(w, `texte · ${e.text}`);
     else if (e.kind === "tool_use") this.note(w, `appel · ${e.name}`);
@@ -678,14 +700,14 @@ export class Hub {
       case "usage":
         // A running estimate from the runner: it may only go up within a run.
         w.costUsd = Math.max(w.costUsd, w.costBase + e.costUsd);
-        this.addCost("workers", this.workers.reduce((a, x) => a + x.costUsd, 0), true);
+        this.workerCosts();
         break;
       case "result":
         if (e.sessionId) w.resume = e.sessionId;
         // The runner's final figure replaces the estimate, but the total shown never goes back down.
         w.costUsd = Math.max(w.costUsd, w.costBase + e.costUsd);
         w.costBase = w.costUsd;
-        this.addCost("workers", this.workers.reduce((a, x) => a + x.costUsd, 0), true);
+        this.workerCosts();
         if (w.status === "running") {
           w.status = e.ok ? "done" : "error";
           if (!e.ok) w.error = e.summary;

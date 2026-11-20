@@ -59,7 +59,7 @@ export function Arrival() {
   const stats: [string, string][] = [
     [String(ep.stats.slides), ep.stats.slides > 1 ? "écrans" : "écran"],
     [String(ep.stats.questions || ep.stats.nodes || ep.stats.objects || ep.stats.changes), ep.stats.questions ? "questions" : ep.stats.nodes ? "étapes" : ep.stats.objects ? "objets 3D" : "changements"],
-    [fmtUsd(s.cost.total), `sur ${s.cost.cap} $ de plafond`],
+    [fmtUsd(s.cost.total), s.cost.plan?.fiveHour ? `payé · plan Claude 5 h : ${Math.round(s.cost.plan.fiveHour.pct)} %` : `sur ${s.cost.cap} $ de plafond`],
   ];
 
   return (

@@ -77,6 +77,23 @@ function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortCo
   const counted = new Set<string>();
   let sessionId: string | undefined;
   const names = new Map<string, string>();
+  /**
+   * Claude plan usage (5-hour and 7-day windows), as Claude Code's /usage shows it. The SDK marks this API as
+   * experimental: when it is missing or fails, nothing is sent and the studio shows the API equivalent only.
+   */
+  let planTimer: NodeJS.Timeout | null = null;
+  const readPlan = async (q: unknown) => {
+    const fn = (q as { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (o: { skipBehaviors: boolean }) => Promise<any> }).usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+    if (typeof fn !== "function") return;
+    try {
+      const u = await fn.call(q, { skipBehaviors: true });
+      if (!u?.rate_limits_available || !u.rate_limits) return;
+      const w = (x: { utilization: number | null; resets_at: string | null } | null | undefined) => (x && typeof x.utilization === "number" ? { pct: x.utilization, resetsAt: x.resets_at ?? null } : null);
+      emit({ kind: "plan", subscription: u.subscription_type ?? null, fiveHour: w(u.rate_limits.five_hour), sevenDay: w(u.rate_limits.seven_day) });
+    } catch {
+      /* experimental API: ignore */
+    }
+  };
   (async () => {
     const stream = query({
       prompt: task.brief,
@@ -102,6 +119,8 @@ function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortCo
         cfg.mcpServers = m.mcp_servers.map((s) => ({ name: s.name, status: s.status }));
         save(cfg);
         emit({ kind: "init", sessionId: m.session_id, mcpServers: cfg.mcpServers, model: m.model });
+        void readPlan(stream);
+        planTimer = setInterval(() => void readPlan(stream), 90_000);
         // Remote servers are often still "pending" when the session starts: only a server that is absent,
         // failed, waiting for a login or disabled counts as unusable.
         const usable = m.mcp_servers.filter((s) => serverAllowed(s.name, task.allowedTools) && (s.status === "connected" || s.status === "pending"));
@@ -136,10 +155,12 @@ function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortCo
           emit({ kind: "tool_result", id: b.tool_use_id, name: names.get(b.tool_use_id), isError: !!b.is_error, output: out.slice(0, 20_000) });
         }
       } else if (m.type === "result") {
+        if (planTimer) clearInterval(planTimer);
+        await readPlan(stream);
         emit({ kind: "result", ok: m.subtype === "success" && !m.is_error, sessionId: m.session_id, costUsd: m.total_cost_usd, turns: m.num_turns, summary: (m.subtype === "success" ? m.result : `Arrêt : ${m.subtype}`).slice(0, 600) });
       }
     }
-  })().catch((e: Error) => {
+  })().finally(() => planTimer && clearInterval(planTimer)).catch((e: Error) => {
     if (abort.signal.aborted) emit({ kind: "result", ok: false, sessionId, costUsd: estimate, turns: 0, summary: "Arrêté." });
     else emit({ kind: "error", message: e.message });
   });

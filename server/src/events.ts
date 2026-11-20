@@ -149,6 +149,18 @@ export function viewerUrl(front: string, entity: Entity, id: string, extra: { pr
   }
 }
 
+/** Where a content is edited in Mexty: the legacy block editor for a block, the 3D editor for a game or a scene. */
+export function editorUrl(front: string, entity: Entity, id: string, extra: { propsId?: string; edverse?: boolean; game?: { blockId: string } } = {}): string {
+  switch (entity) {
+    case "course": return `${front}/lms/courses/${id}/slides`;
+    case "program": return `${front}/lms/programs/${id}/editor`;
+    case "evaluation": return `${front}/lms/evaluations/${id}/editor`;
+    // A game opens on its scene in the EdVerse 3D editor (this page finds the scene from the game).
+    case "block": return extra.edverse ? `${front}/edverse/studio/games/${id}/editor` : `${front}/lms/blocks/${id}/editor${extra.propsId ? `?propsId=${extra.propsId}` : ""}`;
+    case "scene": return `${front}/edverse/editor/${id}`;
+  }
+}
+
 /** Mexty's block runtime page: the block with exactly this props variant. */
 export function previewUrl(front: string, blockId: string, propsId?: string, edverse = false): string {
   return `${front}/preview.html?blockId=${blockId}${propsId ? `&propsId=${propsId}` : ""}${edverse ? "&edverse=1" : ""}`;

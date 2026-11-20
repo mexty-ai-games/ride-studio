@@ -82,7 +82,7 @@ export interface EpisodeRecord {
   beats?: { label: string; ts: number }[];
   startedAt: number;
   endedAt: number;
-  cost: { director: number; voice: number; workers: number; total: number };
+  cost: { director: number; total: number; elevenlabs?: number; otherApis?: number; cloud?: number; planEquivalent?: number; voice?: number; workers?: number; plan?: unknown };
   stats: Record<string, number>;
   delivered: { entity: string; entityId: string; title: string; url?: string }[];
 }
