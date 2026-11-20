@@ -34,6 +34,8 @@ interface AppState {
   recStartedAt: number;
   /** A content the rider opened on the phone by tapping its screen (any time, not only once arrived). */
   opened: { key: string; mode: "edit" | "final" } | null;
+  /** The rider's mic is off (guests, recording and Claude hear nothing from it). */
+  micMuted: boolean;
   /** Guests in the shared ride. */
   guests: { identity: string; name: string }[];
   uploads: Record<string, { sent: number; total: number; done: boolean; error?: string }>;
@@ -67,6 +69,7 @@ export const useApp = create<AppState>((set) => ({
   recording: false,
   recStartedAt: 0,
   opened: null,
+  micMuted: false,
   guests: [],
   uploads: {},
   poster: null,

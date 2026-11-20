@@ -146,6 +146,18 @@ class AudioEngine {
     };
   }
 
+  /**
+   * The rider's mic, off: silence everywhere at once — for guests on the call, in the recording and for Claude,
+   * who stops hearing the rider until it is back on. Claude's voice and the guests' keep playing.
+   */
+  get muted() {
+    return !!this.media && this.media.getAudioTracks().every((t) => !t.enabled);
+  }
+  setMuted(on: boolean) {
+    this.media?.getAudioTracks().forEach((t) => (t.enabled = !on));
+    useApp.getState().set({ micMuted: on });
+  }
+
   playTts(pcm: Int16Array) {
     const ctx = this.ctx;
     if (!ctx || !this.ttsGain || pcm.length === 0) return;
@@ -201,6 +213,7 @@ class AudioEngine {
   }
 
   stop() {
+    useApp.getState().set({ micMuted: false });
     this.cancelTts();
     this.media?.getTracks().forEach((t) => t.stop());
     void this.ctx?.close();

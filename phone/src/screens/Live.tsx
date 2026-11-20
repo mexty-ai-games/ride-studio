@@ -74,6 +74,7 @@ export function Live() {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const guests = useApp((x) => x.guests);
+  const micMuted = useApp((x) => x.micMuted);
   const share = async () => {
     setSharing(true);
     try {
@@ -196,7 +197,7 @@ export function Live() {
 
         <div className="flex min-h-0 grow flex-col gap-1 overflow-hidden rounded-[18px] bg-voice-bg px-3 py-2 text-voice-text">
           <div className="flex items-center justify-end">
-            <span className="text-[11px] font-bold tracking-wider" style={{ color: speaking ? "#FF9BCB" : "#A9B3D9" }}>{speaking ? "CLAUDE PARLE" : partial ? "TU PARLES" : "CLAUDE ÉCOUTE"}</span>
+            <span className="text-[11px] font-bold tracking-wider" style={{ color: speaking ? "#FF9BCB" : "#A9B3D9" }}>{micMuted ? "MICRO COUPÉ" : speaking ? "CLAUDE PARLE" : partial ? "TU PARLES" : "CLAUDE ÉCOUTE"}</span>
           </div>
           {keyboard ? (
             <form className="flex gap-1.5" onSubmit={(e) => { e.preventDefault(); if (text.trim()) link.send({ t: "text", text }); setText(""); }}>
@@ -217,6 +218,7 @@ export function Live() {
           <button onClick={() => link.send({ t: "stop" })} aria-label="Arrêter tous les agents" className="h-11 grow rounded-2xl border-2 border-[#FF3B3B] bg-rec-bg text-sm font-extrabold text-rec-text">Stop</button>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => audio.setMuted(!micMuted)} aria-pressed={micMuted} className="h-11 grow rounded-2xl text-sm font-extrabold" style={micMuted ? { background: "#FFD166", color: "#0B1640", border: 0 } : { background: "var(--surface)", color: "var(--text)", border: "1px solid var(--line)" }}>{micMuted ? "Micro coupé" : "Couper micro"}</button>
           <button onClick={() => setKeyboard((k) => !k)} className="h-11 grow rounded-2xl border border-line bg-surface text-sm font-semibold text-text">{keyboard ? "Masquer" : "Clavier"}</button>
           <button onClick={share} disabled={sharing} className="h-11 grow rounded-2xl border border-line bg-surface text-sm font-semibold text-text">{guests.length ? `Partagé · ${guests.length}` : "Partager"}</button>
           {!arrived ? (
