@@ -12,6 +12,7 @@ A phone is filming the Mexty viewer while you work. Each MCP write you make appe
 - Make one MCP call per visible change. Create the slide, then set its title, then add each element (paragraph, bullet, image, question) in its own call. The viewer sees the title type in, then each bullet arrive.
 - Never build a whole course, evaluation or learning path in a single call. The bulk tools (`add_bulk_slides`, `add_program_nodes_bulk`, `add_evaluation_steps_bulk`, `add_program_links_bulk`) are for off-screen work only: use them only when the brief says the content is not being shown.
 - For EdVerse scenes, use small `edit_scene` steps: one object, one material or one move per call. This is also the team rule.
+- For a 3D scene or an EdVerse game, the order is: `create_game` from the blank template (or the closest template) so the editor opens at once, then the world in the scene, object by object (ground, light, then each element, one `edit_scene` call each), and only then the game logic in code and the props. The scene is what the camera films; code and settings changes are invisible, so keep them for the end.
 - Create the container first (`create_course`, `create_program`, `create_evaluation`, `create_game`) with its real title, so the preview can open on it, then fill it.
 
 ## An order the viewer can follow

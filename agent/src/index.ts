@@ -74,6 +74,7 @@ function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortCo
     return !!server && serverAllowed(server, task.allowedTools);
   };
   let estimate = 0;
+  const counted = new Set<string>();
   let sessionId: string | undefined;
   const names = new Map<string, string>();
   (async () => {
@@ -112,9 +113,14 @@ function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortCo
           return;
         }
       } else if (m.type === "assistant") {
+        // One API response can arrive as several assistant messages (one per block), each repeating the same
+        // usage: count each response once, or the estimate overshoots and drops back at the final figure.
         const u = m.message.usage;
         const [pi, po, pc] = price(task.model);
-        estimate += ((u.input_tokens + (u.cache_creation_input_tokens ?? 0) * 1.25) * pi + u.output_tokens * po + (u.cache_read_input_tokens ?? 0) * pc) / 1e6;
+        if (!counted.has(m.message.id)) {
+          counted.add(m.message.id);
+          estimate += ((u.input_tokens + (u.cache_creation_input_tokens ?? 0) * 1.25) * pi + u.output_tokens * po + (u.cache_read_input_tokens ?? 0) * pc) / 1e6;
+        }
         for (const b of m.message.content) {
           if (b.type === "text" && b.text.trim()) emit({ kind: "text", text: b.text.trim().slice(0, 600) });
           else if (b.type === "tool_use") {

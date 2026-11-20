@@ -676,12 +676,14 @@ export class Hub {
         break;
       }
       case "usage":
-        w.costUsd = w.costBase + e.costUsd;
+        // A running estimate from the runner: it may only go up within a run.
+        w.costUsd = Math.max(w.costUsd, w.costBase + e.costUsd);
         this.addCost("workers", this.workers.reduce((a, x) => a + x.costUsd, 0), true);
         break;
       case "result":
         if (e.sessionId) w.resume = e.sessionId;
-        w.costUsd = w.costBase + e.costUsd;
+        // The runner's final figure replaces the estimate, but the total shown never goes back down.
+        w.costUsd = Math.max(w.costUsd, w.costBase + e.costUsd);
         w.costBase = w.costUsd;
         this.addCost("workers", this.workers.reduce((a, x) => a + x.costUsd, 0), true);
         if (w.status === "running") {

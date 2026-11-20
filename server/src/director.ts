@@ -54,7 +54,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "dispatch_task",
     description:
-      "Lance la construction d'un contenu Mexty réel (parcours, cours, évaluation, activité ou scène 3D EdVerse). Revient immédiatement. Sans `target` : nouveau contenu, en parallèle des autres. Avec `target` = le numéro rendu au lancement : on poursuit ce contenu avec le même contexte (ex. « rends le quiz plus dur »). Un contenu par appel : deux cours = deux appels. Le brief doit être autonome : entreprise, public, sujet, ce qui est attendu, langue.",
+      "Lance la construction d'un contenu Mexty réel (parcours, cours, évaluation, activité ou scène 3D EdVerse). Revient immédiatement. Sans `target` : nouveau contenu, en parallèle des autres. Avec `target` = le numéro rendu au lancement : on poursuit ce contenu avec le même contexte (ex. « rends le quiz plus dur »). Un contenu par appel : deux cours = deux appels. Le brief doit être autonome : entreprise, public, sujet, ce qui est attendu, langue, et demander une construction par petites étapes visibles (pour la 3D : un objet par appel edit_scene).",
     input_schema: { type: "object", properties: { brief: { type: "string" }, target: { type: "integer", description: "Numéro rendu au lancement du contenu à poursuivre" } }, required: ["brief"], additionalProperties: false },
   },
   { name: "get_status", description: "Avancement des contenus, liste des écrans à l'image, temps restant et budget.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
@@ -71,7 +71,8 @@ Ta voix est entendue dans la vidéo. Règles :
 - Ne parle jamais de « worker », d'« agent », de « chantier », de « tâche », de « demande » ni de technique. Parle des contenus : le cours, le quiz, le parcours, la scène.
 - N'explique pas ce que tu vas faire, ne résume pas, ne pose pas de question si tu peux agir. Si tu n'as pas compris : « Tu peux répéter ? »
 - Fabien conduit : ne lui demande jamais de regarder ou de toucher l'écran.
-- Pour tout travail de contenu, appelle dispatch_task puis confirme en quelques mots. Une demande qui modifie un contenu en cours reprend ce contenu (target). Un contenu différent est un nouvel appel sans target.
+- Pour tout travail de contenu, appelle dispatch_task puis confirme en quelques mots.
+- Tout se voit en direct à l'écran : chaque brief demande de construire par toutes petites étapes visibles. Pour une scène 3D ou un jeu EdVerse, écris explicitement dans le brief : créer le jeu à partir du modèle vide, puis construire la scène objet par objet, un seul objet ou groupe par appel edit_scene (le sol, puis la lumière, puis chaque élément), dans un ordre qu'un spectateur peut suivre ; le code de jeu et les réglages seulement à la fin. Jamais toute une scène en un appel. Une demande qui modifie un contenu en cours reprend ce contenu (target). Un contenu différent est un nouvel appel sans target.
 - Dès que Fabien donne l'entreprise, la destination, la durée du trajet ou le sujet, appelle set_episode.
 - Tu ne cliques pas dans les pages et tu n'ouvres pas d'adresse : tu affiches des contenus. Pour toute demande d'ouvrir, montrer, afficher, voir, aller sur un contenu ou une page (même formulée comme une adresse, « /lms/... », ou comme un clic), appelle show_content avec le contenu visé. Le premier cours d'un parcours est le contenu « Cours 1 ». Ne réponds jamais « je ne peux pas » sans avoir d'abord appelé show_content.
 - Il peut y avoir plusieurs écrans à l'image. Ne dis jamais combien il y en a sans l'avoir vérifié dans les événements ou avec get_status. Si focus_tile échoue, appelle get_status et réessaie avec le bon numéro.
@@ -79,6 +80,17 @@ Ta voix est entendue dans la vidéo. Règles :
 - Les outils arrive, pause_recording, resume_recording, show_content, show_qr, switch_camera et radio annoncent eux-mêmes ce qu'ils font : après eux, réponds exactement « … ».
 - N'annonce jamais toi-même qu'un contenu est terminé : le studio le dit à ta place (« Cours 1 terminé. »). Ne prétends jamais qu'un contenu existe.
 - Les messages entre crochets [événements] viennent du studio, pas de Fabien. Réponds exactement « … », sauf s'ils te demandent explicitement de prévenir Fabien : alors une phrase très courte.`;
+
+/**
+ * The lowest-latency thinking setting each model accepts. Haiku 5.5 turns thinking off with "disabled";
+ * Sonnet 5.5 rejects that and takes "between_tools"; Opus 5.5 and Fable accept neither, so the field is left out
+ * and low effort keeps them quick.
+ */
+function thinkingFor(model: string): { thinking?: Anthropic.MessageCreateParams["thinking"]; noThinkingBlocks: boolean } {
+  if (/haiku/.test(model)) return { thinking: { type: "disabled" }, noThinkingBlocks: true };
+  if (/sonnet-5-5/.test(model)) return { thinking: { type: "between_tools" } as unknown as Anthropic.MessageCreateParams["thinking"], noThinkingBlocks: false };
+  return { noThinkingBlocks: false };
+}
 
 export interface DirectorCallbacks {
   /** A complete sentence, ready to be spoken. */
@@ -154,8 +166,9 @@ export class Director {
     const last = this.history.at(-1);
     if (last?.role === "user" && typeof last.content === "string") last.content += `\n${text}`;
     else this.history.push({ role: "user", content: text });
-    // Thinking is off, so trimming old turns is safe; keep the opening context pair.
-    if (this.history.length > 80) {
+    // Trimming old turns is only safe when no thinking block can be in the history: other models check that
+    // the conversation before a replayed block was not edited.
+    if (thinkingFor(this.getModel()).noThinkingBlocks && this.history.length > 80) {
       let cut = this.history.length - 60;
       while (cut < this.history.length && !(this.history[cut].role === "user" && typeof this.history[cut].content === "string")) cut++;
       this.history.splice(2, cut - 2);
@@ -189,8 +202,8 @@ export class Director {
           {
             model,
             max_tokens: 300,
-            // Latency first: no thinking, low effort. (Also keeps the history free of thinking blocks, so it can be trimmed.)
-            thinking: { type: "disabled" },
+            // Latency first: the least thinking the model accepts, low effort.
+            ...(thinkingFor(model).thinking ? { thinking: thinkingFor(model).thinking } : {}),
             output_config: { effort: "low" },
             system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
             tools: TOOLS,
