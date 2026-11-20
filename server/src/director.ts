@@ -205,7 +205,10 @@ export class Director {
         const stream = client.messages.stream(
           {
             model,
-            max_tokens: 300,
+            // Room for the thinking (Sonnet) and a full brief in dispatch_task. 300 cut long briefs mid-call: the
+            // tool got no brief, refused it, and the director retried for ever ("je réessaie avec le brief
+            // complet"). What is spoken stays short through the prompt, not through this cap.
+            max_tokens: 4096,
             // Latency first: the least thinking the model accepts, low effort.
             ...(thinkingFor(model).thinking ? { thinking: thinkingFor(model).thinking } : {}),
             output_config: { effort: "low" },
@@ -229,8 +232,17 @@ export class Director {
         }
         this.history.push({ role: "assistant", content: msg.content });
         const calls = msg.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+        if (msg.stop_reason === "max_tokens") console.warn(`[director] reply cut at max_tokens (${msg.usage.output_tokens} tokens)${calls.length ? `, during ${calls.map((c) => c.name).join(", ")}` : ""}`);
         if (!calls.length) return;
-        this.history.push({ role: "user", content: calls.map((c) => ({ type: "tool_result" as const, tool_use_id: c.id, content: this.runTool(c.name, c.input) })) });
+        this.history.push({
+          role: "user",
+          content: calls.map((c) => {
+            // A call cut by the token cap has incomplete input: say so, rather than running it on half a brief.
+            const out = msg.stop_reason === "max_tokens" && c === calls.at(-1) ? "Erreur : ta réponse a été coupée avant la fin de l'appel. Rappelle l'outil avec un brief plus court." : this.runTool(c.name, c.input);
+            console.log(`[director] ${c.name} → ${out.split("\n")[0].slice(0, 160)}`);
+            return { type: "tool_result" as const, tool_use_id: c.id, content: out };
+          }),
+        });
       }
     } catch (e) {
       if (signal.aborted) {
