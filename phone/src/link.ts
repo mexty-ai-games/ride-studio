@@ -72,7 +72,10 @@ class Link {
         let screen = app.screen;
         if (ep?.status === "live" && screen !== "live" && screen !== "bakeoff") screen = "live";
         if (ep?.status === "ended" && prev?.status === "live") screen = "arrival";
-        app.set({ studio: m.state, screen });
+        // An overlay the rider opened follows what the voice shows next ("ferme" closes it).
+        const was = app.studio?.show.key ?? null;
+        const opened = app.opened && m.state.show.key !== was ? m.state.show.key : app.opened;
+        app.set({ studio: m.state, screen, opened });
         break;
       }
       case "say":

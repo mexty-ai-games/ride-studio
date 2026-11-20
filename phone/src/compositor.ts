@@ -124,6 +124,14 @@ export class Compositor {
   /** Selfie camera is mirrored; the rear camera is not. */
   mirror = true;
   private qr = new Map<string, HTMLImageElement>();
+  /** Where each tile was last drawn, per canvas width (tall 1080, wide 1280), for taps on the picture. */
+  private drawn = new Map<number, Map<number, Rect>>();
+
+  /** The tile under a point given in canvas pixels, or null. */
+  hitTile(canvasWidth: number, x: number, y: number): number | null {
+    for (const [slot, r] of this.drawn.get(canvasWidth) ?? []) if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return slot;
+    return null;
+  }
   targets: { canvas: HTMLCanvasElement; layout: Layout }[] = [];
 
   constructor() {
@@ -248,6 +256,8 @@ export class Compositor {
       ctx.fillText(ep ? "Claude prépare la formation…" : "Prêt à partir", L.previews.x + L.previews.w / 2, L.previews.y + L.previews.h / 2 - L.body / 2);
       ctx.textAlign = "left";
     }
+    const drawn = new Map<number, Rect>();
+    this.drawn.set(L.W, drawn);
     for (const t of tiles) {
       const target = rects.get(t.slot);
       if (!target) {
@@ -259,6 +269,7 @@ export class Compositor {
       // Ease towards the new rectangle so layout changes glide instead of jumping.
       for (const k of ["x", "y", "w", "h"] as const) cur[k] += (target[k] - cur[k]) * 0.22;
       this.anim.set(key, cur);
+      drawn.set(t.slot, { ...cur });
       this.tile(ctx, cur, t, u, now, app);
     }
 

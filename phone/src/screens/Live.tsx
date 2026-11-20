@@ -6,15 +6,24 @@ import { studio } from "../studio";
 import { ShowOverlay } from "./ShowOverlay";
 
 /** Shows a compositor canvas inside the page by re-parenting the real element (what you see is what is recorded). */
-function CanvasView({ canvas, className }: { canvas: HTMLCanvasElement; className?: string }) {
+function CanvasView({ canvas, className, onTap }: { canvas: HTMLCanvasElement; className?: string; onTap?: (x: number, y: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Taps are converted to canvas pixels (the canvas is drawn with object-fit: contain).
+  const tap = (e: React.MouseEvent) => {
+    if (!onTap) return;
+    const r = canvas.getBoundingClientRect();
+    const k = Math.min(r.width / canvas.width, r.height / canvas.height);
+    const ox = (r.width - canvas.width * k) / 2;
+    const oy = (r.height - canvas.height * k) / 2;
+    onTap((e.clientX - r.left - ox) / k, (e.clientY - r.top - oy) / k);
+  };
   useEffect(() => {
     const host = ref.current!;
     canvas.style.cssText = "width:100%;height:100%;object-fit:contain;display:block";
     host.appendChild(canvas);
     return () => void (canvas.parentElement === host && host.removeChild(canvas));
   }, [canvas]);
-  return <div ref={ref} className={className} />;
+  return <div ref={ref} className={className} onClick={tap} style={onTap ? { cursor: "pointer" } : undefined} />;
 }
 
 function useTick(ms: number) {
@@ -57,6 +66,7 @@ export function Live() {
   const [keyboard, setKeyboard] = useState(false);
   const [text, setText] = useState("");
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const opened = useApp((x) => x.opened);
   const ep = s?.episode;
   const needsTap = !audio.media; // the page was reloaded mid-ride
 
@@ -75,7 +85,18 @@ export function Live() {
   return (
     <div className="screen">
       <div className="relative min-w-0 grow overflow-hidden rounded-3xl border border-line bg-black">
-        <CanvasView canvas={studio.wide.canvas} className="h-full w-full" />
+        <CanvasView
+          canvas={studio.wide.canvas}
+          className="h-full w-full"
+          onTap={(x, y) => {
+            // Tapping a screen opens that content full size on the phone, and the video follows it.
+            const slot = studio.comp.hitTile(studio.wide.canvas.width, x, y);
+            const c = slot == null ? undefined : s.contents.find((x) => x.slot === slot);
+            if (!c) return;
+            useApp.getState().set({ opened: c.key });
+            link.send({ t: "show", key: c.key });
+          }}
+        />
         {needsTap && (
           <button onClick={() => void studio.rejoin().catch((e) => useApp.getState().error(String(e)))} className="mx-grad absolute inset-0 m-auto h-20 w-72 rounded-3xl border-0 font-display text-2xl font-extrabold text-white">
             Reprendre l'enregistrement
@@ -182,7 +203,11 @@ export function Live() {
           )}
         </div>
       </div>
-      {s.show.key && arrived && <ShowOverlay s={s} />}
+      {opened && s.contents.some((c) => c.key === opened) ? (
+        <ShowOverlay s={s} contentKey={opened} />
+      ) : (
+        s.show.key && arrived && <ShowOverlay s={s} contentKey={s.show.key} />
+      )}
     </div>
   );
 }

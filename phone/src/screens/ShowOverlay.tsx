@@ -9,10 +9,10 @@ import { fmtClock, useApp } from "../store";
  */
 export const canFrameMexty = () => /(^|\.)mexty\.ai$/.test(location.hostname);
 
-export function ShowOverlay({ s }: { s: StudioState }) {
+export function ShowOverlay({ s, contentKey }: { s: StudioState; contentKey: string }) {
   const recording = useApp((x) => x.recording);
   const recStartedAt = useApp((x) => x.recStartedAt);
-  const c = s.contents.find((x) => x.key === s.show.key);
+  const c = s.contents.find((x) => x.key === contentKey);
   if (!c) return null;
   const paused = s.rec === "paused";
   const btn = "h-10 rounded-full border border-line bg-surface px-3 text-sm font-semibold text-text";
@@ -27,7 +27,7 @@ export function ShowOverlay({ s }: { s: StudioState }) {
         <button onClick={() => link.send({ t: "rec", action: paused ? "resume" : "pause" })} className={btn}>{paused ? "Reprendre" : "Pause"}</button>
         <button onClick={() => link.send({ t: "camera" })} className={btn} aria-label="Changer de caméra">{s.camera === "user" ? "Caméra arrière" : "Caméra avant"}</button>
         <button onClick={() => link.send({ t: "qr", on: !s.show.qr })} aria-pressed={s.show.qr} className={btn}>QR</button>
-        <button onClick={() => link.send({ t: "show", key: null })} className={btn} aria-label="Fermer">Fermer</button>
+        <button onClick={() => { useApp.getState().set({ opened: null }); link.send({ t: "show", key: null }); }} className={btn} aria-label="Fermer">Fermer</button>
       </div>
       <div className="min-h-0 grow">
         {!c.url ? (
