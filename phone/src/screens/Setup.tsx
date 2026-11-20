@@ -45,7 +45,7 @@ export function Setup() {
     r && !r.director && "Claude en mode démo (pas de clé)",
     r && !r.stt.length && "Pas de transcription (clé manquante)",
     r && r.stt.length > 0 && !r.tts && "Voix de secours, non enregistrée",
-    r?.stub && "Aucune machine en ligne : contenu de démonstration",
+    r?.stub && "Aucune machine en ligne : lance npm run agent sur ta machine",
     r && !r.stub && !r.mexty && "Aperçu simplifié (Mexty injoignable)",
   ].filter(Boolean) as string[];
   const small = "h-11 rounded-full border border-line bg-field px-4 text-sm font-semibold text-text";

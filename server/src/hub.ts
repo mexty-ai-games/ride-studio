@@ -441,6 +441,8 @@ export class Hub {
         ` Trajet estimé : ${e.etaMin} minutes. Plafond : ${cap} $. Rien n'est lancé : Fabien va te dire quoi construire.`,
     );
     this.announce("J'attends tes ordres, Fabien.");
+    const offline = store.devices.filter((d) => d.enabled && !this.devices.isOnline(d.id));
+    if (this.readiness().stub && offline.length) setTimeout(() => this.announce(`Attention, ${offline[0].name} est hors ligne.`), 1500);
     void this.checkMexty();
     this.pushState();
   }
@@ -556,12 +558,13 @@ export class Hub {
         return "OK, ajouté.";
       }
       this.launch(w, brief);
-      return "OK, relancé.";
+      return w.status === "error" ? `Erreur : ${w.error}. Le studio l'a déjà annoncé : réponds « … ».` : "OK, relancé.";
     }
     if (this.workers.filter((w) => w.status === "running" || w.status === "queued").length >= 6) return "Erreur : trop de contenus en parallèle. Poursuis un contenu existant avec target.";
     const w: Worker = { id: randomUUID(), no: this.workers.length + 1, brief, runner: "stub", status: "queued", step: "", changes: 0, costUsd: 0, startedAt: Date.now(), pendingCalls: new Map(), queue: [], costBase: 0, log: [], writes: 0 };
     this.workers.push(w);
     this.launch(w, brief);
+    if (w.status === "error") return `Erreur : ${w.error}. Le studio l'a déjà annoncé : réponds « … ».`;
     return `OK, lancé (numéro ${w.no}).`;
   }
 
@@ -588,11 +591,18 @@ export class Hub {
       w.deviceName = undefined;
       w.running = this.cloud.run(spec, emit);
     } else if (!sticky || sticky === "stub") {
+      const paired = store.devices.filter((d) => d.enabled);
       if (!this.readiness().stub) {
         // Real runners exist but are all busy: do not silently fake the work.
         w.status = "error";
         w.error = "Tous les appareils sont occupés et le cloud est désactivé";
         this.announce("Impossible de lancer ça pour l'instant.");
+      } else if (paired.length) {
+        // A machine is paired but offline: fake content would only pass for real work. Say it instead.
+        w.status = "error";
+        w.error = `${paired.map((d) => d.name).join(", ")} hors ligne : lance npm run agent sur la machine`;
+        this.note(w, `erreur · ${w.error}`);
+        this.announce(`${paired[0].name} est hors ligne.`);
       } else {
         w.runner = "stub";
         w.running = this.stub.run(spec, emit);
@@ -782,7 +792,7 @@ export class Hub {
         for (const l of lines) if (!item.lines.includes(l)) item.lines.push(l);
       }
     }
-    if (t.slot != null) void this.previews.mock(t.slot, { kind: `ÉCRAN ${t.slot + 1} · ${ENTITY_LABEL[t.entity]}`, title: t.doc.title, items: t.doc.items, focusId: itemId, chip: ev.op === "create" ? "+ ajouté" : ev.op === "delete" ? "supprimé" : "modifié" });
+    if (t.slot != null) void this.previews.mock(t.slot, { demo: w.runner === "stub", kind: `ÉCRAN ${t.slot + 1} · ${ENTITY_LABEL[t.entity]}`, title: t.doc.title, items: t.doc.items, focusId: itemId, chip: ev.op === "create" ? "+ ajouté" : ev.op === "delete" ? "supprimé" : "modifié" });
 
     this.broadcast({ t: "change", event: ev, slot: t.slot });
     this.pushState();
@@ -876,7 +886,7 @@ export class Hub {
     }
     try {
       await this.previews.open(slot, opts);
-      if (t.slot === slot) await this.previews.mock(slot, { kind: `ÉCRAN ${slot + 1} · ${ENTITY_LABEL[t.entity]}`, title: t.doc.title, items: t.doc.items, focusId: t.doc.items.at(-1)?.id });
+      if (t.slot === slot) await this.previews.mock(slot, { demo: w?.runner === "stub", kind: `ÉCRAN ${slot + 1} · ${ENTITY_LABEL[t.entity]}`, title: t.doc.title, items: t.doc.items, focusId: t.doc.items.at(-1)?.id });
     } catch (e) {
       console.warn("[preview] open failed:", (e as Error).message);
     }
