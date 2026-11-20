@@ -5,6 +5,7 @@ import { fmtClock, fmtUsd, useApp } from "../store";
 import { studio } from "../studio";
 import { CostDetail, costSummary } from "./CostDetail";
 import { ShowOverlay } from "./ShowOverlay";
+import { shareHost } from "../share";
 
 /** Shows a compositor canvas inside the page by re-parenting the real element (what you see is what is recorded). */
 function CanvasView({ canvas, className, onTap }: { canvas: HTMLCanvasElement; className?: string; onTap?: (x: number, y: number) => void }) {
@@ -70,6 +71,18 @@ export function Live() {
   const opened = useApp((x) => x.opened);
   const [choice, setChoice] = useState<string | null>(null);
   const [costOpen, setCostOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const guests = useApp((x) => x.guests);
+  const share = async () => {
+    setSharing(true);
+    try {
+      setShareUrl(await shareHost.start());
+    } catch (e) {
+      useApp.getState().error((e as Error).message);
+    }
+    setSharing(false);
+  };
   const open = (key: string, mode: "edit" | "final") => {
     setChoice(null);
     useApp.getState().set({ opened: { key, mode } });
@@ -205,6 +218,7 @@ export function Live() {
         </div>
         <div className="flex gap-2">
           <button onClick={() => setKeyboard((k) => !k)} className="h-11 grow rounded-2xl border border-line bg-surface text-sm font-semibold text-text">{keyboard ? "Masquer" : "Clavier"}</button>
+          <button onClick={share} disabled={sharing} className="h-11 grow rounded-2xl border border-line bg-surface text-sm font-semibold text-text">{guests.length ? `Partagé · ${guests.length}` : "Partager"}</button>
           {!arrived ? (
             <button onClick={() => link.send({ t: "arrive" })} className="h-11 grow rounded-2xl border-0 text-sm font-bold text-white mx-grad">Arrivé</button>
           ) : confirmEnd ? (
@@ -215,6 +229,24 @@ export function Live() {
         </div>
       </div>
       {costOpen && <CostDetail c={s.cost} onClose={() => setCostOpen(false)} />}
+      {shareUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setShareUrl(null)}>
+          <div className="card flex max-h-full w-full max-w-2xl gap-5 overflow-y-auto rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
+            <img src={`/api/qr.svg?u=${encodeURIComponent(shareUrl)}`} alt="QR code pour rejoindre le trajet" className="aspect-square w-[min(42vw,260px)] shrink-0 rounded-2xl bg-white p-2" />
+            <div className="flex min-w-0 flex-col gap-2">
+              <span className="font-display text-2xl font-extrabold">Partager le trajet</span>
+              <span className="text-sm text-muted">Scanne pour rejoindre en vidéo et parler à Claude. Tout est enregistré dans l'épisode.</span>
+              <code className="select-all break-all text-xs">{shareUrl}</code>
+              <span className="eyebrow mt-1">Invités</span>
+              {guests.length ? guests.map((g) => <span key={g.identity} className="text-sm font-semibold">{g.name}</span>) : <span className="text-sm text-muted">Personne pour l'instant.</span>}
+              <div className="mt-auto flex gap-2">
+                {shareHost.live && <button onClick={() => { shareHost.stop(); setShareUrl(null); }} className="h-10 rounded-full border border-line bg-field px-4 text-sm font-semibold text-text">Arrêter le partage</button>}
+                <button onClick={() => setShareUrl(null)} className="ml-auto h-10 rounded-full border-0 px-4 text-sm font-bold text-white mx-grad">OK</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {choice && (() => {
         const c = s.contents.find((x) => x.key === choice);
         if (!c) return null;

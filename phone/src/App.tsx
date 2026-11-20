@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { link } from "./link";
 import { Arrival } from "./screens/Arrival";
 import { Bakeoff } from "./screens/Bakeoff";
+import { Guest } from "./screens/Guest";
 import { Library } from "./screens/Library";
 import { Live } from "./screens/Live";
 import { Settings } from "./screens/Settings";
@@ -41,6 +42,13 @@ function Login() {
 }
 
 export function App() {
+  // A guest from the QR code: no login, only the join page.
+  const join = /^\/join\/([\w-]{6,40})$/.exec(location.pathname);
+  if (join) return <Guest code={join[1]} />;
+  return <Host />;
+}
+
+function Host() {
   const authed = useApp((s) => s.authed);
   const screen = useApp((s) => s.screen);
   const errors = useApp((s) => s.errors);

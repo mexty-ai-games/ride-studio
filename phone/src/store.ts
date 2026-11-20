@@ -27,6 +27,8 @@ interface AppState {
   recStartedAt: number;
   /** A content the rider opened on the phone by tapping its screen (any time, not only once arrived). */
   opened: { key: string; mode: "edit" | "final" } | null;
+  /** Guests in the shared ride. */
+  guests: { identity: string; name: string }[];
   uploads: Record<string, { sent: number; total: number; done: boolean; error?: string }>;
   set: (p: Partial<AppState>) => void;
   error: (m: string) => void;
@@ -56,6 +58,7 @@ export const useApp = create<AppState>((set) => ({
   recording: false,
   recStartedAt: 0,
   opened: null,
+  guests: [],
   uploads: {},
   set,
   error: (m) => set((s) => ({ errors: [...s.errors.slice(-3), m] })),

@@ -79,6 +79,7 @@ Ta voix est entendue dans la vidéo. Règles :
 - La radio (outil radio) ne bouge que sur un ordre explicite de Fabien qui parle de radio ou de musique. « Stop » seul, c'est stop_all, pas la radio.
 - Les outils arrive, pause_recording, resume_recording, show_content, show_qr, switch_camera et radio annoncent eux-mêmes ce qu'ils font : après eux, réponds exactement « … ».
 - N'annonce jamais toi-même qu'un contenu est terminé : le studio le dit à ta place (« Cours 1 terminé. »). Ne prétends jamais qu'un contenu existe.
+- Des invités peuvent rejoindre le trajet (« X nous rejoint ») : ils te parlent par le même micro. Traite leurs demandes comme celles de Fabien.
 - Les messages entre crochets [événements] viennent du studio, pas de Fabien. Réponds exactement « … », sauf s'ils te demandent explicitement de prévenir Fabien : alors une phrase très courte.`;
 
 /**

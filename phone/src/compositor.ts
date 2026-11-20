@@ -275,25 +275,17 @@ export class Compositor {
 
     if (shown && s?.show.qr && shown.url) this.drawQr(ctx, L, shown.url, rects.get(shown.slot ?? -1));
 
-    // Facecam
-    rr(ctx, L.cam, 30 * u);
-    ctx.save();
-    ctx.clip();
-    ctx.fillStyle = C.voice;
-    ctx.fillRect(L.cam.x, L.cam.y, L.cam.w, L.cam.h);
-    const v = this.cam;
-    if (v && v.readyState >= 2 && v.videoWidth) {
-      const scale = Math.max(L.cam.w / v.videoWidth, L.cam.h / v.videoHeight);
-      const dw = v.videoWidth * scale, dh = v.videoHeight * scale;
-      ctx.translate(L.cam.x + L.cam.w / 2, L.cam.y + L.cam.h / 2);
-      if (this.mirror) ctx.scale(-1, 1); // mirror, like a selfie
-      ctx.drawImage(v, -dw / 2, -dh / 2, dw, dh);
-    }
-    ctx.restore();
-    rr(ctx, L.cam, 30 * u);
-    ctx.lineWidth = 5 * u;
-    ctx.strokeStyle = C.violet;
-    ctx.stroke();
+    // Facecam, and the guests who joined the ride beside it
+    const people: { v: HTMLVideoElement | null; mirror: boolean; name: string }[] = [{ v: this.cam, mirror: this.mirror, name: "" }, ...[...this.guests.values()].map((g) => ({ v: g.video, mirror: false, name: g.name }))];
+    const n = people.length;
+    const cols = n > 1 && L.cam.w > L.cam.h ? Math.min(n, 2) : 1;
+    const rows = Math.ceil(n / cols);
+    const gap = 8 * u;
+    const cw = (L.cam.w - gap * (cols - 1)) / cols, ch = (L.cam.h - gap * (rows - 1)) / rows;
+    people.forEach((p, i) => {
+      const r = { x: L.cam.x + (i % cols) * (cw + gap), y: L.cam.y + Math.floor(i / cols) * (ch + gap), w: cw, h: ch };
+      this.drawPerson(ctx, r, p.v, p.mirror, p.name, (n > 1 ? 18 : 30) * u, u);
+    });
 
     // Voice panel: waveform, who is speaking, Claude's last line and the rider's
     rr(ctx, L.voice, 26 * u);
@@ -338,6 +330,41 @@ export class Compositor {
 
     // Footer: progress chips and the brand
     this.footer(ctx, L, s, u);
+  }
+
+  /** Guests who joined the ride (LiveKit): their camera is drawn beside the rider's, in the recording too. */
+  guests = new Map<string, { video: HTMLVideoElement; name: string }>();
+
+  private drawPerson(ctx: CanvasRenderingContext2D, r: Rect, v: HTMLVideoElement | null, mirror: boolean, name: string, radius: number, u: number) {
+    rr(ctx, r, radius);
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = C.voice;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    if (v && v.readyState >= 2 && v.videoWidth) {
+      const scale = Math.max(r.w / v.videoWidth, r.h / v.videoHeight);
+      const dw = v.videoWidth * scale, dh = v.videoHeight * scale;
+      ctx.translate(r.x + r.w / 2, r.y + r.h / 2);
+      if (mirror) ctx.scale(-1, 1); // mirror, like a selfie
+      ctx.drawImage(v, -dw / 2, -dh / 2, dw, dh);
+    }
+    ctx.restore();
+    rr(ctx, r, radius);
+    ctx.lineWidth = 5 * u;
+    ctx.strokeStyle = name ? C.pink : C.violet;
+    ctx.stroke();
+    if (name) {
+      const fs = Math.round(24 * u);
+      ctx.font = `700 ${fs}px ${SANS}`;
+      const w = ctx.measureText(name).width + fs;
+      rr(ctx, { x: r.x + fs * 0.5, y: r.y + r.h - fs * 2, w, h: fs * 1.5 }, fs * 0.75);
+      ctx.fillStyle = "rgba(11,22,64,0.85)";
+      ctx.fill();
+      ctx.fillStyle = "#FFFFFF";
+      ctx.textBaseline = "middle";
+      ctx.fillText(name, r.x + fs, r.y + r.h - fs * 1.25);
+      ctx.textBaseline = "top";
+    }
   }
 
   /** The QR code of the content shown, on a white card beside it (or over its corner when there is no room). */

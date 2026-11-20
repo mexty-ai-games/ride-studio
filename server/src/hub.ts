@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { WebSocket } from "ws";
 import { BIN_FRAME, BIN_TTS, type ChangeEvent, type ContentLink, type PlanWindow, type CostState, type Entity, type EpisodeSetup, type EpisodeState, type LayoutMode, type Readiness, type ServerToPhone, type StudioState, type TaskEvent, type TileState, type WorkerState } from "../../shared/protocol.js";
 import { config } from "./config.js";
+import { livekit, ShareHub } from "./ride-share.js";
 import { Director } from "./director.js";
 import { deriveChange, editorUrl, ENTITY_LABEL, openUrl, viewerUrl } from "./events.js";
 import { LANDSCAPE, PORTRAIT, PreviewRenderer } from "./preview/renderer.js";
@@ -53,6 +54,7 @@ const STALL_MS = 120_000;
 export class Hub {
   readonly devices = new DeviceHub();
   readonly cloud = new CloudRunner();
+  readonly share = new ShareHub();
   private stub = new StubRunner();
   private phones = new Set<WebSocket>();
   private episode: EpisodeState | null = null;
@@ -183,6 +185,7 @@ export class Hub {
       cloud,
       mexty: this.mextyOk,
       stub: devicesOnline === 0 && !cloud,
+      share: livekit.configured,
     };
   }
   private tiles(): TileState[] {
@@ -300,6 +303,15 @@ export class Hub {
       });
     }
     return out;
+  }
+
+  /** A guest joined through the QR code: the voice knows who is talking with it. */
+  guestJoined(name: string) {
+    this.director.note(`${name} a rejoint le trajet et peut te parler comme Fabien.`);
+    this.announce(`${name} nous rejoint.`);
+  }
+  guestLeft(name: string) {
+    this.director.note(`${name} a quitté le trajet.`);
   }
 
   /** The ride is over: the chrono stops, but everything else (recording, building, the voice) goes on. */
@@ -455,6 +467,7 @@ export class Hub {
     this.devices.stopAll();
     this.director.halt();
     ep.status = "ended";
+    this.share.close(ep.id);
     ep.endedAt = Date.now();
     const front = store.settings.mexty.frontUrl;
     ep.delivered = this.contents().map((c) => ({ entity: c.entity, entityId: c.key.split(":")[1], title: c.title || c.name, url: c.url || undefined }));

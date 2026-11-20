@@ -14,6 +14,7 @@ import { deleteVideos, diskUsage, recordingsBytes, recordingsRouter, videosOf } 
 import { SECRET_NAMES, store, type SecretName } from "./store.js";
 import { openStt, STT_VENDORS, type SttSession, type SttVendor } from "./stt/index.js";
 import { listVoices } from "./tts.js";
+import { livekit } from "./ride-share.js";
 
 const hub = new Hub();
 const app = express();
@@ -157,6 +158,32 @@ app.delete("/api/episodes/:id", requireAuth, (req, res) => {
   deleteVideos(id);
   store.removeEpisode(id);
   res.json({ ok: true });
+});
+
+// ---- Partager le trajet: guests join through a QR code (LiveKit) ----
+app.post("/api/ride/share", requireAuth, (_req, res) => {
+  const ep = hub.state().episode;
+  if (!livekit.configured) return void res.status(503).json({ error: "LiveKit n'est pas configuré (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)." });
+  if (!ep || ep.status !== "live") return void res.status(409).json({ error: "Aucun épisode en cours." });
+  const inv = hub.share.inviteFor(ep.id);
+  // The address the host is using (ride.mexty.ai), so the QR opens the same app.
+  const base = _req.get("host") ? `${_req.protocol}://${_req.get("host")}` : config.publicUrl;
+  res.json({ url: `${base}/join/${inv.code}`, livekitUrl: livekit.url, room: inv.room, token: hub.share.hostToken(ep.id), guests: [...inv.guests.values()] });
+});
+app.get("/api/ride/join/:code", (req, res) => {
+  const inv = hub.share.find(String(req.params.code));
+  const ep = hub.state().episode;
+  if (!inv || !ep || ep.id !== inv.episodeId || ep.status !== "live") return void res.status(404).json({ error: "Ce trajet est terminé ou le lien n'est plus valable." });
+  res.json({ episodeNo: ep.no, company: ep.setup.company, destination: ep.setup.destination });
+});
+app.post("/api/ride/join/:code", (req, res) => {
+  if (limited(`join:${req.ip}`, 20, 10 * 60_000)) return void res.status(429).json({ error: "Trop d'essais." });
+  const inv = hub.share.find(String(req.params.code));
+  const ep = hub.state().episode;
+  if (!inv || !ep || ep.id !== inv.episodeId || ep.status !== "live" || !livekit.configured) return void res.status(404).json({ error: "Ce trajet est terminé ou le lien n'est plus valable." });
+  const name = String(req.body?.name ?? "").replace(/[^\p{L}\p{N} '\-]/gu, "").trim().slice(0, 30) || "Invité";
+  const g = hub.share.guestToken(inv, name);
+  res.json({ livekitUrl: livekit.url, room: inv.room, token: g.token, identity: g.identity, name });
 });
 
 // ---- QR code of a content link (drawn on the phone and into the recording) ----
@@ -322,6 +349,8 @@ function phoneSocket(ws: WebSocket) {
         return void hub.showContent(typeof m.key === "string" ? m.key : null);
       case "qr":
         return void hub.setQr(!!m.on);
+      case "guest":
+        return void (m.joined ? hub.guestJoined(String(m.name).slice(0, 30)) : hub.guestLeft(String(m.name).slice(0, 30)));
       case "radio":
         return void hub.setRadio(m.action === "off" ? "off" : m.action === "next" ? "next" : "on");
       case "radio.ended":

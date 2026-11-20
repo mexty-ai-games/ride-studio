@@ -130,6 +130,8 @@ export interface Readiness {
   cloud: boolean;
   mexty: boolean; // service session can be minted
   stub: boolean; // demo mode: no real workers available
+  /** LiveKit is configured: the ride can be shared with guests. */
+  share: boolean;
 }
 
 /** A Radio Monkey track as the phone plays it. */
@@ -179,6 +181,8 @@ export type PhoneToServer =
   | { t: "camera"; facing?: "user" | "environment" }
   | { t: "show"; key: string | null }
   | { t: "qr"; on: boolean }
+  /** A guest is now in the shared ride (seen by the host phone). */
+  | { t: "guest"; name: string; joined: boolean }
   | { t: "radio"; action: "on" | "off" | "next" }
   /** The phone finished playing a track (next one, please) or learnt its length. */
   | { t: "radio.ended"; trackId: string }

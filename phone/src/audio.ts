@@ -71,7 +71,11 @@ class AudioEngine {
     const capture = new AudioWorkletNode(ctx, "rs-capture", { numberOfInputs: 1, numberOfOutputs: 0 });
     capture.port.onmessage = (e: MessageEvent<{ pcm: Int16Array; rms: number }>) => this.onMic(e.data.pcm, e.data.rms);
     mic.connect(capture);
+    this.capture = capture;
     this.mixDest = ctx.createMediaStreamDestination();
+    // What guests hear: the rider and Claude (and the sounds), never their own voices back.
+    this.hostOut = ctx.createMediaStreamDestination();
+    mic.connect(this.hostOut);
     this.micAnalyser = ctx.createAnalyser();
     this.micAnalyser.fftSize = 256;
     mic.connect(this.micAnalyser);
@@ -82,6 +86,7 @@ class AudioEngine {
     this.ttsGain.connect(this.ttsAnalyser);
     this.ttsGain.connect(ctx.destination);
     this.ttsGain.connect(this.mixDest);
+    this.ttsGain.connect(this.hostOut);
     this.ctx = ctx;
     this.media = media;
     try {
@@ -113,6 +118,32 @@ class AudioEngine {
     if (!this.ctx || !this.mixDest) return;
     node.connect(this.ctx.destination);
     node.connect(this.mixDest);
+    if (this.hostOut) node.connect(this.hostOut);
+  }
+
+  private capture: AudioWorkletNode | null = null;
+  hostOut: MediaStreamAudioDestinationNode | null = null;
+
+  /**
+   * A guest's voice: in the headset, in the recording, and into the transcription, so Claude hears the guest
+   * exactly as it hears the rider. Returns the function that removes it.
+   */
+  addRemote(stream: MediaStream): () => void {
+    const ctx = this.ctx;
+    if (!ctx || !this.mixDest || !this.capture) return () => {};
+    // Chrome only feeds a remote WebRTC stream into WebAudio while a media element plays it.
+    const el = new Audio();
+    el.muted = true;
+    el.srcObject = stream;
+    void el.play().catch(() => {});
+    const src = ctx.createMediaStreamSource(stream);
+    src.connect(ctx.destination);
+    src.connect(this.mixDest);
+    src.connect(this.capture);
+    return () => {
+      src.disconnect();
+      el.srcObject = null;
+    };
   }
 
   playTts(pcm: Int16Array) {
@@ -177,6 +208,8 @@ class AudioEngine {
     this.ctx = null;
     this.media = null;
     this.mixDest = null;
+    this.hostOut = null;
+    this.capture = null;
   }
 }
 

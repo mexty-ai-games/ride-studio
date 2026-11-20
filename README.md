@@ -38,6 +38,12 @@ Music under the episode. The library lives on the volume under `radio/` (Réglag
 - **Public**: `GET /api/public/radio` (CORS open) lists what is on air and every track that has been broadcast; only those files are public (`/api/radio/file/<id>.<ext>`). fabien.ninja reads it.
 - **Routine (later)**: `POST /api/radio/tracks/url` with `{ url, title, artist, cover, prompt }` and `Authorization: Bearer $RADIO_TOKEN` adds a track without a session, e.g. from a Suno generation.
 
+## Share the ride (guests)
+
+"Partager" on the Live screen shows a QR code. A guest scans it, types a first name and joins the ride in a LiveKit room: they see the picture being recorded and hear the rider and Claude. Their camera is drawn into the recording next to the rider's, and their voice is mixed into the recording and into the transcription, so they talk to Claude the same way. Guests configure nothing; the invite ends with the episode.
+
+Set `LIVEKIT_URL` (wss://…), `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` on the Ride Studio service.
+
 ## Run it locally
 
 ```bash
