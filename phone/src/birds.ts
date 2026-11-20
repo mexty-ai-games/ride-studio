@@ -1,6 +1,7 @@
 import type { ChangeEvent, Entity } from "../../shared/protocol";
 import { audio } from "./audio";
 import { link } from "./link";
+import { radio } from "./radio";
 
 /**
  * Bird notes for progress. Every note belongs to one pentatonic scale (C D E G A), so whatever fires,
@@ -96,6 +97,7 @@ class Birds {
     if (!n) return;
     const { voice, base } = BIRD[entity];
     const t = this.slot(n.ctx, degrees.length + 1);
+    radio.duck((t - n.ctx.currentTime + (degrees.length + 2) * GRID) * 1000);
     degrees.forEach((d, i) => this.note(n.ctx, n.out, t + i * GRID, base + d, voice, gain));
   }
 
@@ -125,6 +127,7 @@ class Birds {
     // Contents built side by side sing a third apart.
     const harmony = (slot ?? 0) * 2;
     const t = this.slot(n.ctx, previous ? 2 : 1);
+    radio.duck((t - n.ctx.currentTime + 4 * GRID) * 1000);
     // The item that was being built is done: a soft low note first, then the new one.
     if (previous) this.note(n.ctx, n.out, t, base + harmony - 5 + (WALK[(i - 1) % WALK.length] % 5), voice, 0.45, 0.07);
     this.note(n.ctx, n.out, t + (previous ? GRID : 0), base + harmony + WALK[i % WALK.length], voice);

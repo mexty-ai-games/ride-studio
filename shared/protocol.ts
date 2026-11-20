@@ -106,6 +106,26 @@ export interface Readiness {
   stub: boolean; // demo mode: no real workers available
 }
 
+/** A Radio Monkey track as the phone plays it. */
+export interface RadioTrackView {
+  id: string;
+  title: string;
+  artist: string;
+  durationSec?: number;
+  cover?: string;
+  url: string;
+}
+
+/** Radio Monkey: music under the episode, on and off only when Fabien asks. */
+export interface RadioState {
+  on: boolean;
+  track: RadioTrackView | null;
+  /** When the current track started on air (the phone joins mid-track at the right offset). */
+  startedAt: number;
+  /** Tracks available to play. */
+  library: number;
+}
+
 export interface StudioState {
   episode: EpisodeState | null;
   workers: WorkerState[];
@@ -121,6 +141,7 @@ export interface StudioState {
   /** A content shown to someone: full picture in the recording and open on the phone. */
   show: { key: string | null; qr: boolean };
   contents: ContentLink[];
+  radio: RadioState;
 }
 
 // ---- phone <-> server (JSON text frames) ----
@@ -132,6 +153,10 @@ export type PhoneToServer =
   | { t: "camera"; facing?: "user" | "environment" }
   | { t: "show"; key: string | null }
   | { t: "qr"; on: boolean }
+  | { t: "radio"; action: "on" | "off" | "next" }
+  /** The phone finished playing a track (next one, please) or learnt its length. */
+  | { t: "radio.ended"; trackId: string }
+  | { t: "radio.meta"; trackId: string; durationSec: number }
   | { t: "stt.start"; bakeoff?: boolean; vendors?: string[] }
   | { t: "stt.stop" }
   | { t: "bargein" }

@@ -4,6 +4,7 @@ import { Arrival } from "./screens/Arrival";
 import { Bakeoff } from "./screens/Bakeoff";
 import { Library } from "./screens/Library";
 import { Live } from "./screens/Live";
+import { RadioScreen } from "./screens/Radio";
 import { Settings } from "./screens/Settings";
 import { Setup } from "./screens/Setup";
 import { api, useApp } from "./store";
@@ -70,6 +71,7 @@ export function App() {
       {screen === "settings" && <Settings />}
       {screen === "bakeoff" && <Bakeoff />}
       {screen === "library" && <Library />}
+      {screen === "radio" && <RadioScreen />}
       {errors.length > 0 && (
         <div role="alert" className="fixed left-1/2 top-3 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl bg-rec-bg px-4 py-2 text-sm font-semibold text-rec-text shadow-lg">
           {errors.at(-1)}

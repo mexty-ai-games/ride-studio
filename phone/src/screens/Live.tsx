@@ -25,6 +25,26 @@ function useTick(ms: number) {
   }, [ms]);
 }
 
+/** Radio Monkey: what is on air, with on/off and next for when the bike is stopped. */
+function RadioCard() {
+  const r = useApp((x) => x.studio?.radio);
+  if (!r) return null;
+  const btn = "h-8 shrink-0 rounded-full px-3 text-xs font-bold";
+  return (
+    <div className="card flex items-center gap-2 rounded-[18px] px-2.5 py-1.5">
+      <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl text-lg" style={{ background: r.on ? "#FFD166" : "var(--field)" }}>
+        {r.on && r.track?.cover ? <img src={r.track.cover} alt="" className="h-full w-full object-cover" /> : "🐒"}
+      </span>
+      <span className="min-w-0 grow">
+        <span className="block truncate whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider" style={{ color: r.on ? "var(--accent-text)" : "var(--muted)" }}>{r.on ? "● Radio Monkey" : "Radio Monkey"}</span>
+        <span className="block truncate text-xs font-semibold">{r.on && r.track ? `${r.track.title} · ${r.track.artist}` : r.library ? `${r.library} morceau${r.library > 1 ? "x" : ""}` : "Aucun morceau"}</span>
+      </span>
+      {r.on && <button onClick={() => link.send({ t: "radio", action: "next" })} aria-label="Morceau suivant" className={`${btn} border border-line bg-field text-text`}>»</button>}
+      <button disabled={!r.on && !r.library} onClick={() => link.send({ t: "radio", action: r.on ? "off" : "on" })} className={`${btn} border-0 ${r.on ? "bg-field text-text" : "mx-grad text-white"}`}>{r.on ? "Couper" : "Lancer"}</button>
+    </div>
+  );
+}
+
 export function Live() {
   useTick(500);
   const s = useApp((x) => x.studio);
@@ -126,6 +146,8 @@ export function Live() {
             </div>
           )}
         </div>
+
+        <RadioCard />
 
         <div className="flex min-h-0 grow flex-col gap-1 overflow-hidden rounded-[18px] bg-voice-bg px-3 py-2 text-voice-text">
           <div className="flex items-center justify-end">
