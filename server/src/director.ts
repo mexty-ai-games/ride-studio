@@ -18,6 +18,7 @@ export interface DirectorActions {
   endEpisode(): string;
   stopAll(): string;
   arrive(): string;
+  nameSpeaker(name: string): string;
   pauseRecording(): string;
   resumeRecording(): string;
   switchCamera(): string;
@@ -60,14 +61,16 @@ const TOOLS: Anthropic.Tool[] = [
   { name: "get_status", description: "Avancement des contenus, liste des écrans à l'image, temps restant et budget.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "set_layout", description: "Disposition des aperçus dans la vidéo.", input_schema: { type: "object", properties: { mode: { type: "string", enum: ["auto", "single", "split", "grid"] } }, required: ["mode"], additionalProperties: false } },
   { name: "focus_tile", description: "Met un écran en plein écran. n = numéro de l'écran tel qu'il est à l'image (écran 1, écran 2…, « le deuxième » = 2), ou n = 0 pour revoir tous les écrans (la grille). Les événements et get_status disent quel contenu est sur quel écran : si Fabien nomme un contenu (« la scène 3D », « le système solaire »), choisis l'écran qui le porte.", input_schema: { type: "object", properties: { n: { type: "integer" } }, required: ["n"], additionalProperties: false } },
+  { name: "name_speaker", description: "Donne son prénom à « une autre voix » qui vient de parler près de Fabien (elle s'est présentée, ou Fabien l'a présentée). Ensuite ses messages arrivent sous son prénom.", input_schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"], additionalProperties: false } },
   { name: "mark_beat", description: "Marque un moment fort de la vidéo (pour le montage), avec un libellé court.", input_schema: { type: "object", properties: { label: { type: "string" } }, required: ["label"], additionalProperties: false } },
 ];
 
 const SYSTEM = `Tu es la voix de « Ride Studio ». Fabien, fondateur de Mexty, roule à moto et te parle au casque. Il te dit quoi construire sur Mexty ; tu lances le travail avec tes outils, l'écran montre le contenu se construire en direct, et tout est filmé.
 
 Ta voix est entendue dans la vidéo. Règles :
-- Extrêmement brève : une seule phrase, dix mots au plus. « C'est parti. » « Deux cours lancés. » « Compris, je durcis le quiz. »
-- Français. Pas de listes, pas de markdown, pas d'émojis, pas d'identifiants.
+- Brève, toujours : en général une phrase courte, deux au plus quand on te pose une vraie question ou qu'on discute. Pour une simple confirmation, quelques mots (« C'est parti. » « Deux cours lancés. »). Naturelle et chaleureuse, pas robotique.
+- Réponds dans la langue de la personne qui vient de parler : français, anglais, espagnol, allemand… (le message peut préciser « langue en »). Fabien parle français. Pas de listes, pas de markdown, pas d'émojis, pas d'identifiants.
+- Chaque message dit qui parle, entre crochets : [Fabien], [Léa, invité] (une invitée connectée au trajet), [Marie, près de Fabien] (une personne au même micro), [une autre voix, près de Fabien] (une voix que tu ne connais pas encore). Adresse-toi à cette personne, par son prénom si tu le connais. Si une autre voix se présente ou que Fabien la présente, appelle name_speaker avec son prénom. Si tu ne sais pas qui parle, ne devine pas de prénom.
 - Ne parle jamais de « worker », d'« agent », de « chantier », de « tâche », de « demande » ni de technique. Parle des contenus : le cours, le quiz, le parcours, la scène.
 - N'explique pas ce que tu vas faire, ne résume pas, ne pose pas de question si tu peux agir. Si tu n'as pas compris : « Tu peux répéter ? »
 - Fabien conduit : ne lui demande jamais de regarder ou de toucher l'écran.
@@ -79,8 +82,8 @@ Ta voix est entendue dans la vidéo. Règles :
 - La radio (outil radio) ne bouge que sur un ordre explicite de Fabien qui parle de radio ou de musique. « Stop » seul, c'est stop_all, pas la radio.
 - Les outils arrive, pause_recording, resume_recording, show_content, show_qr, switch_camera et radio annoncent eux-mêmes ce qu'ils font : après eux, réponds exactement « … ».
 - N'annonce jamais toi-même qu'un contenu est terminé : le studio le dit à ta place (« Cours 1 terminé. »). Ne prétends jamais qu'un contenu existe.
-- Des invités peuvent rejoindre le trajet (« X nous rejoint ») : ils te parlent par le même micro. Traite leurs demandes comme celles de Fabien.
-- Les messages entre crochets [événements] viennent du studio, pas de Fabien. Réponds exactement « … », sauf s'ils te demandent explicitement de prévenir Fabien : alors une phrase très courte.`;
+- Des invités peuvent rejoindre le trajet (« X nous rejoint ») ou parler près de Fabien. Traite leurs demandes comme celles de Fabien, dans leur langue.
+- Les messages qui commencent par [événements] viennent du studio, pas d'une personne. Réponds exactement « … », sauf s'ils te demandent explicitement de prévenir Fabien : alors une phrase très courte.`;
 
 /**
  * The lowest-latency thinking setting each model accepts. Haiku 5.5 turns thinking off with "disabled";
@@ -265,6 +268,8 @@ export class Director {
           return this.actions.resumeRecording();
         case "switch_camera":
           return this.actions.switchCamera();
+        case "name_speaker":
+          return this.actions.nameSpeaker(String(a.name ?? ""));
         case "show_content":
           return this.actions.showContent(a.close ? null : typeof a.name === "string" ? a.name : "");
         case "show_qr":

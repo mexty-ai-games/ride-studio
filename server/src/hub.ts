@@ -4,6 +4,7 @@ import type { WebSocket } from "ws";
 import { BIN_FRAME, BIN_TTS, type ChangeEvent, type ContentLink, type PlanWindow, type CostState, type Entity, type EpisodeSetup, type EpisodeState, type LayoutMode, type Readiness, type ServerToPhone, type StudioState, type TaskEvent, type TileState, type WorkerState } from "../../shared/protocol.js";
 import { config } from "./config.js";
 import { ShareHub } from "./ride-share.js";
+import { Speakers } from "./speakers.js";
 import { Director } from "./director.js";
 import { deriveChange, editorUrl, ENTITY_LABEL, openUrl, viewerUrl } from "./events.js";
 import { LANDSCAPE, PORTRAIT, PreviewRenderer } from "./preview/renderer.js";
@@ -55,6 +56,7 @@ export class Hub {
   readonly devices = new DeviceHub();
   readonly cloud = new CloudRunner();
   readonly share = new ShareHub();
+  readonly speakers = new Speakers("Fabien");
   private stub = new StubRunner();
   private phones = new Set<WebSocket>();
   private episode: EpisodeState | null = null;
@@ -75,10 +77,10 @@ export class Hub {
   private ttsAbort: AbortController | null = null;
   private sayId = 0;
   /** This episode's transcript, saved with it and shown on fabien.ninja. */
-  private transcript: { ts: number; who: "fabien" | "claude" | "studio"; text: string }[] = [];
-  private line(who: "fabien" | "claude" | "studio", text: string) {
+  private transcript: { ts: number; who: "fabien" | "claude" | "studio" | "guest"; name?: string; text: string }[] = [];
+  private line(who: "fabien" | "claude" | "studio" | "guest", text: string, name?: string) {
     if (this.episode?.status !== "live" || !text.trim() || this.transcript.length >= 2000) return;
-    this.transcript.push({ ts: Date.now(), who, text: text.trim().slice(0, 800) });
+    this.transcript.push({ ts: Date.now(), who, ...(name ? { name } : {}), text: text.trim().slice(0, 800) });
   }
   private lastSaid = "";
   speaking = false;
@@ -107,6 +109,7 @@ export class Hub {
       pauseRecording: () => this.setRec("pause"),
       resumeRecording: () => this.setRec("resume"),
       switchCamera: () => this.setCamera(),
+      nameSpeaker: (name: string) => this.nameSpeaker(name),
       showContent: (name) => {
         if (name === null) return void this.showContent(null), "Fermé.";
         const c = this.findContent(name);
@@ -450,6 +453,7 @@ export class Hub {
     this.rec = "on";
     this.show = { key: null, qr: false };
     this.transcript = [];
+    this.speakers.reset();
     const cap = Math.max(1, Number(setup.budgetCap) || store.settings.budget.capUsd);
     this.cost = { director: 0, elevenlabs: 0, otherApis: 0, cloud: 0, planEquivalent: 0, total: 0, cap, warned: false, capped: false, plan: null };
     this.episode = {
@@ -593,10 +597,18 @@ export class Hub {
     this.director.interrupt();
     this.broadcast({ t: "tts.cancel" });
   }
-  userTurn(text: string) {
-    this.line("fabien", text);
-    this.broadcast({ t: "user", text });
-    this.director.user(text);
+  /** A turn from the transcription: who said it (see speakers.ts) and in which language go to Claude with it. */
+  userTurn(text: string, meta: { dgSpeaker?: number; language?: string } = {}) {
+    const who = this.speakers.identify({ dgSpeaker: meta.dgSpeaker });
+    this.line(who.rider ? "fabien" : "guest", text, who.rider ? undefined : who.unknown ? "Autre voix" : who.name);
+    this.broadcast({ t: "user", text: who.rider ? text : `${who.unknown ? "Autre voix" : who.name} : ${text}` });
+    const tag = who.rider ? who.name : who.guest ? `${who.name}, invité` : who.unknown ? "une autre voix, près de Fabien" : `${who.name}, près de Fabien`;
+    const lang = meta.language && meta.language !== store.settings.voice.language ? ` · langue ${meta.language}` : "";
+    this.director.user(`[${tag}${lang}] ${text}`);
+  }
+  /** Claude learnt who the other voice is. */
+  nameSpeaker(name: string): string {
+    return this.speakers.name(name);
   }
 
   // ---------- workers ----------

@@ -311,7 +311,7 @@ function phoneSocket(ws: WebSocket) {
         if (isBake) return;
         // Server-side barge-in backstop: real words while Claude is talking.
         if (e.kind === "partial" && hub.speaking && (e.text ?? "").trim().split(/\s+/).length >= 2) hub.stopSpeaking();
-        if (e.kind === "eot" && e.text) hub.userTurn(e.text);
+        if (e.kind === "eot" && e.text) hub.userTurn(e.text, { dgSpeaker: e.speaker, language: e.language });
       },
     });
     sessions.push(s);
@@ -364,6 +364,14 @@ function phoneSocket(ws: WebSocket) {
         return hub.endEpisode();
       case "bargein":
         return hub.stopSpeaking();
+      case "voice": {
+        // Phone clock → server clock.
+        if (!Array.isArray(m.frames) || typeof m.now !== "number") return;
+        const skew = Date.now() - m.now;
+        return hub.speakers.add(
+          m.frames.slice(0, 40).map((f) => ({ ts: Number(f.ts) + skew, src: f.src === "mic" ? "mic" : String(f.src).slice(0, 30), f0: typeof f.f0 === "number" && f.f0 > 50 && f.f0 < 500 ? f.f0 : undefined })),
+        );
+      }
       case "stop":
         return hub.stopAll();
       case "arrive":

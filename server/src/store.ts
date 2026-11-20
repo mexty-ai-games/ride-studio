@@ -30,7 +30,10 @@ export interface Settings {
   };
   voice: {
     sttVendor: "elevenlabs" | "deepgram" | "openai";
+    /** Fabien's language: Claude's default and the voice it picks. */
     language: string;
+    /** Anyone may speak another language: transcription detects it and Claude answers in it. */
+    multilingual: boolean;
     languageHints: string[];
     ttsVoiceId: string;
     ttsModel: string;
@@ -55,6 +58,7 @@ export const DEFAULT_SETTINGS: Settings = {
   voice: {
     sttVendor: "elevenlabs",
     language: "fr",
+    multilingual: true,
     languageHints: ["Mexty", "EdVerse", "Claude", "quiz", "parcours"],
     ttsVoiceId: "",
     ttsModel: "eleven_flash_v2_5",
@@ -92,7 +96,9 @@ export interface EpisodeRecord {
 }
 export interface TranscriptLine {
   ts: number;
-  who: "fabien" | "claude" | "studio";
+  who: "fabien" | "claude" | "studio" | "guest";
+  /** A guest's or another voice's name. */
+  name?: string;
   text: string;
 }
 

@@ -79,6 +79,10 @@ class AudioEngine {
     this.micAnalyser = ctx.createAnalyser();
     this.micAnalyser.fftSize = 256;
     mic.connect(this.micAnalyser);
+    this.pitchAnalyser = ctx.createAnalyser();
+    this.pitchAnalyser.fftSize = 2048;
+    mic.connect(this.pitchAnalyser);
+    this.voiceTimer = window.setInterval(() => this.sampleVoices(), 100);
     mic.connect(this.mixDest);
     this.ttsGain = ctx.createGain();
     this.ttsAnalyser = ctx.createAnalyser();
@@ -122,13 +126,55 @@ class AudioEngine {
   }
 
   private capture: AudioWorkletNode | null = null;
+  private pitchAnalyser: AnalyserNode | null = null;
+  private remotes = new Map<AnalyserNode, string>();
+  private voiceFrames: { ts: number; src: string; f0?: number }[] = [];
+  private voiceTimer: number | null = null;
+  private voiceSent = 0;
+  private buf = new Float32Array(2048);
+
+  /**
+   * Who is speaking, ten times a second: the loudest source (the rider's mic or a guest's stream) and, on the mic,
+   * the pitch of the voice. The server matches each turn to a person with it (server/src/speakers.ts).
+   */
+  private sampleVoices() {
+    const ctx = this.ctx;
+    if (!ctx || !this.pitchAnalyser) return;
+    const now = Date.now();
+    let src = "", loud = 0.02, f0: number | undefined;
+    if (!this.muted) {
+      this.pitchAnalyser.getFloatTimeDomainData(this.buf);
+      const rms = rmsOf(this.buf);
+      if (rms > loud) {
+        loud = rms;
+        src = "mic";
+        f0 = pitchOf(this.buf, ctx.sampleRate);
+      }
+    }
+    for (const [an, name] of this.remotes) {
+      const b = new Float32Array(an.fftSize);
+      an.getFloatTimeDomainData(b);
+      const rms = rmsOf(b);
+      if (rms > loud * 1.1) {
+        loud = rms;
+        src = name;
+        f0 = undefined;
+      }
+    }
+    if (src) this.voiceFrames.push({ ts: now, src, ...(f0 ? { f0: Math.round(f0) } : {}) });
+    if (this.voiceFrames.length && now - this.voiceSent >= 500) {
+      this.voiceSent = now;
+      link.send({ t: "voice", now, frames: this.voiceFrames.splice(0, 40) });
+      this.voiceFrames.length = 0;
+    }
+  }
   hostOut: MediaStreamAudioDestinationNode | null = null;
 
   /**
    * A guest's voice: in the headset, in the recording, and into the transcription, so Claude hears the guest
    * exactly as it hears the rider. Returns the function that removes it.
    */
-  addRemote(stream: MediaStream): () => void {
+  addRemote(stream: MediaStream, name = "Invité"): () => void {
     const ctx = this.ctx;
     if (!ctx || !this.mixDest || !this.capture) return () => {};
     // Chrome only feeds a remote WebRTC stream into WebAudio while a media element plays it.
@@ -140,7 +186,12 @@ class AudioEngine {
     src.connect(ctx.destination);
     src.connect(this.mixDest);
     src.connect(this.capture);
+    const an = ctx.createAnalyser();
+    an.fftSize = 1024;
+    src.connect(an);
+    this.remotes.set(an, name);
     return () => {
+      this.remotes.delete(an);
       src.disconnect();
       el.srcObject = null;
     };
@@ -214,6 +265,9 @@ class AudioEngine {
 
   stop() {
     useApp.getState().set({ micMuted: false });
+    if (this.voiceTimer) clearInterval(this.voiceTimer);
+    this.voiceTimer = null;
+    this.remotes.clear();
     this.cancelTts();
     this.media?.getTracks().forEach((t) => t.stop());
     void this.ctx?.close();
@@ -224,6 +278,34 @@ class AudioEngine {
     this.hostOut = null;
     this.capture = null;
   }
+}
+
+const rmsOf = (b: Float32Array) => {
+  let s = 0;
+  for (let i = 0; i < b.length; i++) s += b[i] * b[i];
+  return Math.sqrt(s / b.length);
+};
+
+/** Pitch of a voiced frame (70–400 Hz) by autocorrelation on a 4× decimated copy; undefined when unvoiced. */
+function pitchOf(b: Float32Array, rate: number): number | undefined {
+  const step = 4, r = rate / step, n = Math.floor(b.length / step);
+  const x = new Float32Array(n);
+  for (let i = 0; i < n; i++) x[i] = (b[i * step] + b[i * step + 1] + b[i * step + 2] + b[i * step + 3]) / 4;
+  const minLag = Math.floor(r / 400), maxLag = Math.min(n - 32, Math.ceil(r / 70));
+  let e0 = 0;
+  for (let i = 0; i < n; i++) e0 += x[i] * x[i];
+  if (!e0) return undefined;
+  let best = 0, lag = 0;
+  for (let l = minLag; l <= maxLag; l++) {
+    let c = 0, e = 0;
+    for (let i = 0; i + l < n; i++) {
+      c += x[i] * x[i + l];
+      e += x[i + l] * x[i + l];
+    }
+    const v = c / Math.sqrt(e0 * e || 1);
+    if (v > best) (best = v), (lag = l);
+  }
+  return best > 0.55 && lag ? r / lag : undefined;
 }
 
 export const audio = new AudioEngine();

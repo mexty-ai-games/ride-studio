@@ -180,7 +180,7 @@ export function publicSessionsRouter(): Router {
     const e = byNo(req.params.no);
     if (!e) return void res.status(404).json({ error: "not found" });
     res.setHeader("Cache-Control", "public, max-age=30");
-    res.json({ ...sessionView(e, base()), transcript: (e.transcript ?? []).map((l) => ({ atSec: Math.max(0, Math.round((l.ts - e.startedAt) / 1000)), who: l.who, text: l.text })) });
+    res.json({ ...sessionView(e, base()), transcript: (e.transcript ?? []).map((l) => ({ atSec: Math.max(0, Math.round((l.ts - e.startedAt) / 1000)), who: l.who, name: l.name, text: l.text })) });
   });
   r.get("/:no/:file", (req, res) => {
     const e = byNo(req.params.no);

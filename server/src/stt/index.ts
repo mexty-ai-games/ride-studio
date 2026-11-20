@@ -5,6 +5,10 @@ export type SttVendor = "elevenlabs" | "deepgram" | "openai";
 export interface SttEvent {
   kind: "open" | "partial" | "final" | "eot" | "error" | "close";
   text?: string;
+  /** The vendor's speaker index for this turn, when it separates voices (Deepgram Nova). */
+  speaker?: number;
+  /** The language the vendor heard, when it says (ISO 639-1). */
+  language?: string;
   ts: number;
 }
 /** One streaming transcription. `final` = a committed segment; `eot` = the vendor says the turn is over (text = whole turn). */
@@ -65,14 +69,15 @@ function elevenlabs({ apiKey, voice, on }: Opts): SttSession {
     model_id: model,
     audio_format: "pcm_16000",
     commit_strategy: model === "scribe_v3_live" ? "turn_prediction" : "vad",
-    language_code: voice.language,
     vad_silence_threshold_secs: "1.2",
   });
+  // Multilingual: no language, Scribe detects it on every turn.
+  if (!voice.multilingual) q.set("language_code", voice.language);
   let ready = false;
   const pending: Buffer[] = [];
   const s = socket("elevenlabs", `wss://api.elevenlabs.io/v1/speech-to-text/realtime?${q}`, { "xi-api-key": apiKey }, on, {
     message(d) {
-      const m = JSON.parse(d.toString()) as { message_type: string; text?: string; error?: string };
+      const m = JSON.parse(d.toString()) as { message_type: string; text?: string; error?: string; language_code?: string };
       if (m.message_type === "session_started") {
         ready = true;
         on({ kind: "open", ts: now() });
@@ -82,8 +87,9 @@ function elevenlabs({ apiKey, voice, on }: Opts): SttSession {
       } else if (m.message_type === "committed_transcript") {
         // The commit IS the end-of-turn signal on this API.
         if (m.text?.trim()) {
-          on({ kind: "final", text: m.text.trim(), ts: now() });
-          on({ kind: "eot", text: m.text.trim(), ts: now() });
+          const language = m.language_code?.slice(0, 2);
+          on({ kind: "final", text: m.text.trim(), ts: now(), language });
+          on({ kind: "eot", text: m.text.trim(), ts: now(), language });
         }
       } else if (m.error || /error|exceeded|limited|overflow|exhausted/.test(m.message_type)) {
         on({ kind: "error", text: `elevenlabs: ${m.message_type} ${m.error ?? ""}`.trim(), ts: now() });
@@ -112,7 +118,9 @@ function deepgram({ apiKey, voice, on }: Opts): SttSession {
     if (model.endsWith("multi")) for (const l of new Set([voice.language, "en"])) q.append("language_hint", l);
     for (const k of voice.languageHints.slice(0, 20)) q.append("keyterm", k);
   } else {
-    q.set("language", voice.language);
+    q.set("language", voice.multilingual ? "multi" : voice.language);
+    // Two people at the same mic: Nova tells their voices apart (speaker 0, 1…).
+    q.set("diarize", "true");
     q.set("channels", "1");
     q.set("interim_results", "true");
     q.set("endpointing", "300");
@@ -120,6 +128,14 @@ function deepgram({ apiKey, voice, on }: Opts): SttSession {
     q.set("smart_format", "true");
   }
   let turn = ""; // Nova: finals accumulated until the endpoint
+  const spk = new Map<number, number>(); // words per speaker in the current turn
+  let lang: string | undefined;
+  const speakerOfTurn = () => {
+    let best: number | undefined, n = 0;
+    for (const [k, v] of spk) if (v > n) (best = k), (n = v);
+    spk.clear();
+    return best;
+  };
   let spoke = false;
   let ka: NodeJS.Timeout | null = null;
   const s = socket("deepgram", `wss://api.deepgram.com/${flux ? "v2" : "v1"}/listen?${q}`, { Authorization: `Token ${apiKey}` }, on, {
@@ -138,14 +154,17 @@ function deepgram({ apiKey, voice, on }: Opts): SttSession {
           }
         } else if (text) on({ kind: "partial", text, ts: now() });
       } else if (m.type === "Results") {
-        const text = String(m.channel?.alternatives?.[0]?.transcript ?? "").trim();
+        const alt = m.channel?.alternatives?.[0];
+        const text = String(alt?.transcript ?? "").trim();
         if (m.is_final) {
           if (text) {
+            for (const w of alt?.words ?? []) if (typeof w.speaker === "number") spk.set(w.speaker, (spk.get(w.speaker) ?? 0) + 1);
+            if (Array.isArray(alt?.languages) && alt.languages[0]) lang = String(alt.languages[0]).slice(0, 2);
             turn = `${turn} ${text}`.trim();
             on({ kind: "final", text, ts: now() });
           }
           if (m.speech_final && turn) {
-            on({ kind: "eot", text: turn, ts: now() });
+            on({ kind: "eot", text: turn, ts: now(), speaker: speakerOfTurn(), language: lang });
             turn = "";
             spoke = true;
           }
@@ -155,7 +174,7 @@ function deepgram({ apiKey, voice, on }: Opts): SttSession {
         }
       } else if (m.type === "UtteranceEnd") {
         // Only an end of turn when no speech_final already closed it.
-        if (!spoke && turn) on({ kind: "eot", text: turn, ts: now() });
+        if (!spoke && turn) on({ kind: "eot", text: turn, ts: now(), speaker: speakerOfTurn(), language: lang });
         turn = "";
         spoke = false;
       } else if (m.type === "Error") on({ kind: "error", text: `deepgram: ${m.code} ${m.description}`, ts: now() });
@@ -195,8 +214,8 @@ function openai({ apiKey, voice, on }: Opts): SttSession {
   const s = socket("openai", "wss://api.openai.com/v1/realtime?intent=transcription", { Authorization: `Bearer ${apiKey}` }, on, {
     ready(ws) {
       const transcription: Record<string, unknown> = { model, prompt: voice.languageHints.join(", ") };
-      if (/^gpt-(live-)?transcribe$/.test(model)) transcription.languages = [...new Set([voice.language, "en"])];
-      else transcription.language = voice.language;
+      if (/^gpt-(live-)?transcribe$/.test(model)) transcription.languages = voice.multilingual ? [...new Set([voice.language, "en", "es", "de", "it", "pt"])] : [voice.language];
+      else if (!voice.multilingual) transcription.language = voice.language;
       ws.send(
         JSON.stringify({
           type: "session.update",

@@ -40,7 +40,8 @@ export async function streamTts(apiKey: string, voice: Settings["voice"], text: 
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=pcm_24000`, {
     method: "POST",
     headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ text, model_id: voice.ttsModel, language_code: voice.language, previous_text: previous.slice(-300) || undefined }),
+    // The reply's own language, so an English answer is spoken in English with the same voice.
+    body: JSON.stringify({ text, model_id: voice.ttsModel, language_code: voice.multilingual ? guessLanguage(text) ?? voice.language : voice.language, previous_text: previous.slice(-300) || undefined }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error(`ElevenLabs TTS ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -57,4 +58,25 @@ export async function streamTts(apiKey: string, voice: Settings["voice"], text: 
     }
     if (buf.length) onChunk(buf);
   }
+}
+
+const STOPWORDS: Record<string, string[]> = {
+  fr: ["le", "la", "les", "de", "des", "du", "un", "une", "et", "est", "je", "tu", "nous", "vous", "pour", "pas", "que", "qui", "c'est", "ça", "sur", "avec", "dans", "terminé", "lancé", "compris", "parti"],
+  en: ["the", "and", "is", "are", "you", "i", "we", "to", "of", "a", "it", "for", "on", "with", "that", "this", "done", "got", "let's", "your", "what", "how", "hello", "hi"],
+  es: ["el", "los", "las", "y", "es", "está", "que", "de", "para", "con", "una", "por", "hola", "gracias", "vamos", "listo", "tú", "usted"],
+  de: ["der", "die", "das", "und", "ist", "ich", "du", "wir", "nicht", "mit", "für", "ein", "eine", "hallo", "danke", "fertig"],
+  it: ["il", "lo", "gli", "e", "è", "che", "di", "per", "con", "una", "sono", "ciao", "grazie", "fatto", "andiamo"],
+  pt: ["o", "os", "as", "e", "é", "que", "de", "para", "com", "uma", "não", "olá", "obrigado", "pronto", "vamos"],
+};
+/** The language of a short reply, by its common words; null when unsure (the voice's language is used). */
+export function guessLanguage(text: string): string | null {
+  const words = text.toLowerCase().match(/[\p{L}']+/gu) ?? [];
+  if (!words.length) return null;
+  let best: string | null = null, top = 0, second = 0;
+  for (const [lang, list] of Object.entries(STOPWORDS)) {
+    const n = words.filter((w) => list.includes(w)).length;
+    if (n > top) (second = top), (top = n), (best = lang);
+    else if (n > second) second = n;
+  }
+  return top > 0 && top > second ? best : null;
 }

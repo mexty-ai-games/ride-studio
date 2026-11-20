@@ -178,6 +178,8 @@ export type PhoneToServer =
   | { t: "episode.end" }
   | { t: "arrive" }
   | { t: "rec"; action: "pause" | "resume" }
+  /** Who is speaking: speech frames from the phone (its mic with the pitch, or a guest's stream), every ~0.5 s. */
+  | { t: "voice"; now: number; frames: { ts: number; src: string; f0?: number }[] }
   | { t: "camera"; facing?: "user" | "environment" }
   | { t: "show"; key: string | null }
   | { t: "qr"; on: boolean }

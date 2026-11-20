@@ -6,7 +6,7 @@ interface Device { id: string; name: string; enabled: boolean; concurrency: numb
 interface View {
   settings: {
     claude: { directorModel: string; workerModel: string; allowedTools: string[]; maxTurns: number; workspace: string; templates: string[] };
-    voice: { sttVendor: string; language: string; languageHints: string[]; ttsVoiceId: string; ttsModel: string; bargeIn: number; sttModels: Record<string, string> };
+    voice: { sttVendor: string; language: string; multilingual?: boolean; languageHints: string[]; ttsVoiceId: string; ttsModel: string; bargeIn: number; sttModels: Record<string, string> };
     budget: { capUsd: number };
     cloud: { enabled: boolean; concurrency: number; vaultId: string; agentId: string };
     mexty: { frontUrl: string; apiUrl: string; preview: string };
@@ -151,6 +151,7 @@ export function Settings() {
               <Row key={k} label={`Modèle ${k}`}><input className="field" defaultValue={st.voice.sttModels[k]} onBlur={(e) => void patch({ voice: { sttModels: { [k]: e.target.value.trim() } } })} /></Row>
             ))}
             <Row label="Langue"><select className="field" value={st.voice.language} onChange={(e) => void patch({ voice: { language: e.target.value } })}><option value="fr">Français</option><option value="en">English</option></select></Row>
+            <Row label="Multilingue" hint="Chacun peut parler sa langue : Claude répond dans la langue de la personne qui parle."><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={st.voice.multilingual !== false} onChange={(e) => void patch({ voice: { multilingual: e.target.checked } })} /> Détecter la langue</label></Row>
             <Row label="Mots à reconnaître" hint="Noms propres et jargon, séparés par des virgules."><input className="field" defaultValue={st.voice.languageHints.join(", ")} onBlur={(e) => void patch({ voice: { languageHints: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) } })} /></Row>
             <Row label="Voix de Claude"><select className="field" value={st.voice.ttsVoiceId} onChange={(e) => void patch({ voice: { ttsVoiceId: e.target.value } })}><option value="">Automatique (voix française)</option>{voices.map((x) => <option key={x.id} value={x.id}>{x.name}{x.languages.length ? ` · ${x.languages.slice(0, 3).join(", ")}` : ""}</option>)}</select></Row>
             <Row label="Modèle de voix"><select className="field" value={st.voice.ttsModel} onChange={(e) => void patch({ voice: { ttsModel: e.target.value } })}>{["eleven_flash_v2_5", "eleven_v4_turbo", "eleven_v3_conversational", "eleven_multilingual_v2"].map((m) => <option key={m}>{m}</option>)}</select></Row>

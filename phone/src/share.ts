@@ -100,7 +100,7 @@ class ShareHost {
       const stream = e.streams[0] ?? new MediaStream([e.track]);
       if (e.track.kind === "audio") {
         p.removeVoice?.();
-        p.removeVoice = audio.addRemote(new MediaStream([e.track]));
+        p.removeVoice = audio.addRemote(new MediaStream([e.track]), p.name);
       } else {
         const v = document.createElement("video");
         v.muted = true;
