@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtUsd, setTheme, useApp } from "../store";
+import { RadioLibrary } from "./RadioLibrary";
 
 interface Device { id: string; name: string; enabled: boolean; concurrency: number; online: boolean; platform: string; claudeCodeVersion: string | null; mcpServers: { name: string; status: string }[]; activeSessions: number; lastSeen: number }
 interface View {
@@ -17,7 +18,7 @@ interface View {
   mextyLink: { secretSet: boolean; webhookUrl: string };
   publicUrl: string;
 }
-const TABS = ["Appareils", "Claude Code", "Voix", "Clés API", "Budget", "Journal"] as const;
+const TABS = ["Appareils", "Claude Code", "Voix", "Radio Monkey", "Clés API", "Budget", "Journal"] as const;
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -174,6 +175,8 @@ export function Settings() {
             ))}
           </>
         )}
+
+        {tab === "Radio Monkey" && <RadioLibrary />}
 
         {tab === "Journal" && (
           <>

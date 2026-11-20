@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { ChangeEvent, StudioState } from "../../shared/protocol";
 
-export type Screen = "setup" | "live" | "arrival" | "settings" | "bakeoff" | "library" | "radio";
+export type Screen = "setup" | "live" | "arrival" | "settings" | "bakeoff" | "library";
 export interface SttLine {
   vendor: string;
   kind: string;

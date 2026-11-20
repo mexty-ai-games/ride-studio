@@ -31,7 +31,7 @@ The phone records into its own browser storage first, so a dropped connection ne
 
 ## Radio Monkey
 
-Music under the episode. The library lives on the volume under `radio/` (Radio Monkey screen: add a Suno audio link or any https audio file, or upload from the phone; switch tracks in or out of the playlist).
+Music under the episode. The library lives on the volume under `radio/` (Réglages → Radio Monkey: send audio files from the phone or computer, several at once, or add a Suno or any https audio link; switch tracks in or out of the playlist). Only this password-protected app can add music: fabien.ninja is public and read-only.
 
 - **On, off, next only when Fabien asks**: the director's `radio` tool is limited to explicit requests ("mets la radio", "coupe la radio", "morceau suivant"); a plain "stop" is still the emergency stop and leaves the music alone. The Live screen has the same buttons. The radio stops with the episode.
 - **Ducking**: the music drops (0.3 → 0.06) as soon as a line is announced, while Claude's voice plays, and during the progress notes, then comes back over 0.6 s. It goes to the headset and into the recording.

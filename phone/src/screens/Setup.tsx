@@ -61,7 +61,6 @@ export function Setup() {
       </p>
       <div className="flex flex-wrap justify-center gap-2">
         <button onClick={() => set({ screen: "library" })} className={small}>Épisodes</button>
-        <button onClick={() => set({ screen: "radio" })} className={small}>Radio Monkey</button>
         <button onClick={() => set({ screen: "settings" })} className={small}>Réglages</button>
         <button onClick={() => set({ screen: "bakeoff" })} className={small}>Test micro</button>
         <button aria-pressed={wide} onClick={() => { localStorage.setItem(WIDE_KEY, wide ? "0" : "1"); setWide(!wide); }} className={small}>{wide ? "9:16 + 16:9" : "9:16 seul"}</button>
