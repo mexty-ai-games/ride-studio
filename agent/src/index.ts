@@ -101,7 +101,9 @@ function runTask(cfg: Cfg, task: TaskRun, emit: (e: TaskEvent) => void): AbortCo
         cfg.mcpServers = m.mcp_servers.map((s) => ({ name: s.name, status: s.status }));
         save(cfg);
         emit({ kind: "init", sessionId: m.session_id, mcpServers: cfg.mcpServers, model: m.model });
-        const usable = m.mcp_servers.filter((s) => s.status === "connected" && serverAllowed(s.name, task.allowedTools));
+        // Remote servers are often still "pending" when the session starts: only a server that is absent,
+        // failed, waiting for a login or disabled counts as unusable.
+        const usable = m.mcp_servers.filter((s) => serverAllowed(s.name, task.allowedTools) && (s.status === "connected" || s.status === "pending"));
         if (!usable.length) {
           // Without them the model can only answer in words: stop now and say why, instead of "done".
           const seen = m.mcp_servers.map((s) => `${s.name} (${s.status})`).join(", ") || "aucun";
